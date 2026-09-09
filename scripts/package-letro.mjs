@@ -1,5 +1,11 @@
 // Package one verified embedded build for every host; never rebuild per client.
-import { cpSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  rmSync,
+  cpSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { execFileSync } from "node:child_process";
 const manifest = JSON.parse(readFileSync("dist/call-branding.json", "utf8"));
 if (manifest.version !== 1 || !manifest.brands.includes("letro"))
@@ -10,6 +16,7 @@ const revision = execFileSync("git", ["rev-parse", "HEAD"], {
 const version = process.env.LETRO_CALL_VERSION || "0.25.0-letro.1";
 if (!/^\d+\.\d+\.\d+-letro\.\d+$/.test(version))
   throw new Error("Expected a Letro prerelease version");
+rmSync("letro-packages", { recursive: true, force: true });
 mkdirSync("letro-packages", { recursive: true });
 cpSync("embedded/ios", "letro-packages/swift", { recursive: true });
 cpSync("dist", "letro-packages/swift/Sources/dist", { recursive: true });
@@ -41,4 +48,6 @@ writeFileSync(
   JSON.stringify({ revision, version, contract: manifest }, null, 2),
 );
 
-execFileSync("zip", ["-qr", "../../element-call-assets.zip", "element-call"], { cwd: "letro-packages/android/assets" });
+execFileSync("zip", ["-qr", "../../element-call-assets.zip", "element-call"], {
+  cwd: "letro-packages/android/assets",
+});
