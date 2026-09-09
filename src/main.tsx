@@ -54,7 +54,8 @@ if (fatalError !== null) {
 }
 
 Initializer.initBeforeReact()
-  .then(() => {
+  .then(async () => {
+    await Config.init();
     initializeCallBrand(Config.get().brand);
     document.body.dataset.callBrand = getCallBrand();
     document.title = getProductName();

@@ -82,7 +82,16 @@ try {
       await page.goto(
         `${url}/#?theme=${theme}${brand === "letro" ? "&brand=letro" : ""}`,
       );
-      await page.getByTestId("home_callName").waitFor();
+      await page
+        .getByTestId("home_callName")
+        .waitFor()
+        .catch(async (error) => {
+          console.error(await page.locator("body").innerText());
+          await page.screenshot({
+            path: `${output}/${brand}-${theme}-failure.png`,
+          });
+          throw error;
+        });
       assert.equal(
         await page.locator("body").getAttribute("data-call-brand"),
         brand,

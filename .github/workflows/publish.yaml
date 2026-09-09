@@ -9,6 +9,7 @@ env:
 
 jobs:
   build_element_call:
+    if: github.repository == 'element-hq/element-call'
     uses: ./.github/workflows/build-element-call.yaml
     with:
       package: full
@@ -21,7 +22,7 @@ jobs:
 
   publish_tarball:
     needs: build_element_call
-    if: always()
+    if: always() && github.repository == 'element-hq/element-call'
     name: Publish tarball
     runs-on: ubuntu-latest
     permissions:
@@ -50,7 +51,7 @@ jobs:
 
   publish_docker:
     needs: build_element_call
-    if: always()
+    if: always() && github.repository == 'element-hq/element-call'
     name: Publish docker
     permissions:
       contents: write
