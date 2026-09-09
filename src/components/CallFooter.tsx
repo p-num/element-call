@@ -8,6 +8,8 @@ Please see LICENSE in the repository root for full details.
 import { type FC, type JSX, type Ref, useMemo } from "react";
 import classNames from "classnames";
 
+import { getCallBrand, getProductName } from "../branding/brand";
+import { BrandLogo } from "../branding/BrandLogo";
 import LogoMark from "../icons/LogoMark.svg?react";
 import LogoType from "../icons/LogoType.svg?react";
 import {
@@ -278,11 +280,14 @@ export const CallFooter: FC<FooterProps> = ({
     <div className={styles.logo}>
       {showLogo && (
         <>
-          <LogoMark width={24} height={24} aria-hidden />
-          <LogoType
+          {getCallBrand() === "element" && (
+            <LogoMark width={24} height={24} aria-hidden />
+          )}
+          <BrandLogo
+            element={LogoType}
             width={80}
             height={11}
-            aria-label={import.meta.env.VITE_PRODUCT_NAME || "Element Call"}
+            aria-label={getProductName()}
           />
         </>
       )}

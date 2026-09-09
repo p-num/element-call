@@ -13,6 +13,7 @@ import { Heading, Text } from "@vector-im/compound-web";
 import { UserProfileIcon } from "@vector-im/compound-design-tokens/assets/web/icons";
 
 import styles from "./Header.module.css";
+import { BrandLogo } from "./branding/BrandLogo";
 import Logo from "./icons/Logo.svg?react";
 import { Avatar, Size } from "./Avatar";
 import { EncryptionLock } from "./room/EncryptionLock";
@@ -121,7 +122,7 @@ export const HeaderLogo: FC<HeaderLogoProps> = ({ className }) => {
       to="/"
       aria-label={t("header_label")}
     >
-      <Logo />
+      <BrandLogo element={Logo} />
     </Link>
   );
 };

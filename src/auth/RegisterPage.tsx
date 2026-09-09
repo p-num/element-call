@@ -25,6 +25,7 @@ import { FieldRow, InputField, ErrorMessage } from "../input/Input";
 import { useClientLegacy } from "../ClientContext";
 import { useInteractiveRegistration } from "./useInteractiveRegistration";
 import styles from "./LoginPage.module.css";
+import { BrandLogo } from "../branding/BrandLogo";
 import Logo from "../icons/LogoLarge.svg?react";
 import { LoadingPage } from "../FullScreenView";
 import { useRecaptcha } from "./useRecaptcha";
@@ -158,7 +159,12 @@ export const RegisterPage: FC = () => {
       <div className={styles.container}>
         <div className={styles.content}>
           <div className={styles.formContainer}>
-            <Logo width="auto" height="auto" className={styles.logo} />
+            <BrandLogo
+              element={Logo}
+              width="auto"
+              height="auto"
+              className={styles.logo}
+            />
             <h2>{t("register_heading")}</h2>
             <form onSubmit={onSubmitRegisterForm}>
               <FieldRow>

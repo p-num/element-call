@@ -22,6 +22,7 @@ import { useTheme } from "./useTheme";
 import { getUrlParams } from "./UrlParams";
 import { widget } from "./widget";
 
+vi.mock("./branding/brand", () => ({ getCallBrand: () => "letro" }));
 vi.mock("./UrlParams", () => ({ getUrlParams: vi.fn() }));
 vi.mock("./widget", () => ({
   widget: {
@@ -101,5 +102,6 @@ describe("useTheme", () => {
       "cpd-theme-dark-hc",
     );
     expect(originalClassList.add).toHaveBeenLastCalledWith("cpd-theme-light");
+    expect(document.body.dataset.callBrand).toBe("letro");
   });
 });

@@ -10,6 +10,7 @@ import { useNavigate, useLocation } from "react-router-dom";
 import { Trans, useTranslation } from "react-i18next";
 import { Button } from "@vector-im/compound-web";
 
+import { BrandLogo } from "../branding/BrandLogo";
 import Logo from "../icons/LogoLarge.svg?react";
 import { useClient } from "../ClientContext";
 import { FieldRow, InputField, ErrorMessage } from "../input/Input";
@@ -85,7 +86,12 @@ export const LoginPage: FC = () => {
       <div className={styles.container}>
         <div className={styles.content}>
           <div className={styles.formContainer}>
-            <Logo width="auto" height="auto" className={styles.logo} />
+            <BrandLogo
+              element={Logo}
+              width="auto"
+              height="auto"
+              className={styles.logo}
+            />
 
             <h2>{t("log_in")}</h2>
             <h4>{t("login_subheading")}</h4>

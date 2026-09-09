@@ -7,6 +7,8 @@ Please see LICENSE in the repository root for full details.
 
 @layer normalize, compound-legacy, compound;
 
+@import url("./branding/generated.css");
+
 @import url("@fontsource/inter/400.css");
 @import url("@fontsource/inter/500.css");
 @import url("@fontsource/inter/600.css");
@@ -28,6 +30,7 @@ Please see LICENSE in the repository root for full details.
   --font-size-headline: calc(32px * var(--font-scale));
 
   --cpd-color-border-accent: var(--cpd-color-green-800);
+  --call-speaking-gradient: radial-gradient(#0467dd, #0bc491), linear-gradient(0deg, #0467dd 0%, #0bc491 100%);
   /* The distance to inset non-full-width content from the edge of the window
   along the inline axis. This ramps up from 16px for typical mobile windows, to
   96px for typical desktop windows, and accounts for the safe area. */
@@ -223,4 +226,15 @@ button:-moz-focusring,
 [type="reset"]:-moz-focusring,
 [type="submit"]:-moz-focusring {
   outline: auto;
+}
+
+/* The Letro background is generated from tokens, including on mobile. */
+body[data-call-brand="letro"][data-background="gradient"]::before {
+  background-image: var(--call-page-background);
+}
+
+@media (forced-colors: active) {
+  body[data-call-brand="letro"] {
+    --call-speaking-gradient: linear-gradient(Highlight, Highlight);
+  }
 }

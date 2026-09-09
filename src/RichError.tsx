@@ -5,6 +5,7 @@ SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Element-Commercial
 Please see LICENSE in the repository root for full details.
 */
 
+import { getProductName } from "./branding/brand";
 import { useTranslation } from "react-i18next";
 import { PopOutIcon } from "@vector-im/compound-design-tokens/assets/web/icons";
 
@@ -39,7 +40,7 @@ const OpenElsewhere: FC = () => {
     >
       <p>
         {t("error.open_elsewhere_description", {
-          brand: import.meta.env.VITE_PRODUCT_NAME || "Element Call",
+          brand: getProductName(),
         })}
       </p>
     </ErrorView>

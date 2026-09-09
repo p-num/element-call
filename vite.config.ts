@@ -12,6 +12,7 @@ import {
   type ConfigEnv,
   type UserConfig,
 } from "vite";
+import { generateThemeCSS } from "./src/branding/theme";
 import svgrPlugin from "vite-plugin-svgr";
 import { createHtmlPlugin } from "vite-plugin-html";
 
@@ -28,7 +29,21 @@ export const vitePluginsConfig = ({
   mode,
 }: Pick<ConfigEnv, "mode">): UserConfig => {
   const env = loadEnv(mode, process.cwd());
+  fs.writeFileSync(
+    new URL("./src/branding/generated.css", import.meta.url),
+    generateThemeCSS() + "\n",
+  );
   const plugins: PluginOption[] = [
+    {
+      name: "call-brand-contract",
+      generateBundle() {
+        this.emitFile({
+          type: "asset",
+          fileName: "call-branding.json",
+          source: JSON.stringify({ version: 1, brands: ["element", "letro"] }),
+        });
+      },
+    },
     babel({
       presets: [reactCompilerPreset()],
     }),
