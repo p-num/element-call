@@ -1,12 +1,13 @@
 /* Copyright 2026 p-num. SPDX-License-Identifier: AGPL-3.0-only */
 import { getUrlParams } from "../UrlParams";
-import { type CallBrand } from "./theme";
+import { parseBrand, type CallBrand } from "./theme";
+import { Config } from "../config/Config";
 
 // Branding is a host/deployment choice for the lifetime of this app, so router
 // navigation and widget appearance changes cannot accidentally reset it.
 let brand: CallBrand | undefined;
 export function getCallBrand(): CallBrand {
-  return (brand ??= getUrlParams().brand);
+  return (brand ??= parseBrand(getUrlParams().brand ?? Config.get().brand));
 }
 export function getProductName(): string {
   return getCallBrand() === "letro"

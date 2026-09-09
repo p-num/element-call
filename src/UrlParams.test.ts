@@ -35,7 +35,7 @@ describe("UrlParams", () => {
     },
   );
   it("preserves Element as the default and rejects CSS URLs", () => {
-    expect(computeUrlParams("", "").brand).toBe("element");
+    expect(computeUrlParams("", "").brand).toBeNull();
     expect(
       computeUrlParams("", "#?brand=https://example.com/theme.css").brand,
     ).toBe("element");

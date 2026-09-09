@@ -153,7 +153,7 @@ export interface UrlProperties {
    */
   theme: string | null;
   /** Allowlisted call branding, independent of light/dark appearance. */
-  brand: CallBrand;
+  brand: CallBrand | null;
   /**
    * The visual style of the page background.
    */
@@ -465,7 +465,10 @@ export const computeUrlParams = (search = "", hash = ""): UrlParams => {
     fonts: parser.getAllParams("font"),
     fontScale: Number.isNaN(fontScale) ? null : fontScale,
     theme: parser.getParam("theme"),
-    brand: parseBrand(parser.getParam("brand") ?? Config.get().brand),
+    brand:
+      parser.getParam("brand") === null
+        ? null
+        : parseBrand(parser.getParam("brand")),
     background:
       parser.getEnumParam("background", BackgroundStyle) ??
       BackgroundStyle.Gradient,
