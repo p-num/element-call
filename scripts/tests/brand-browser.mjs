@@ -87,6 +87,7 @@ try {
         .waitFor()
         .catch(async (error) => {
           console.error(await page.locator("body").innerText());
+          await page.waitForTimeout(500); // Let form/color transitions settle for review.
           await page.screenshot({
             path: `${output}/${brand}-${theme}-failure.png`,
           });
@@ -105,12 +106,27 @@ try {
       await page.getByTestId("home_callName").fill("Theme preview");
       await page.getByTestId("home_displayName").fill("Preview participant");
       await page.getByTestId("home_go").focus();
-      await page.screenshot({ path: `${output}/${brand}-${theme}-start.png` });
+      if (brand === "letro")
+        assert.equal(
+          await page
+            .getByTestId("home_go")
+            .evaluate((el) => getComputedStyle(el).outlineStyle),
+          "solid",
+        );
+      await page.waitForTimeout(500); // Let form/color transitions settle for review.
+      await page.screenshot({
+        animations: "disabled",
+        path: `${output}/${brand}-${theme}-start.png`,
+      });
       await page.getByTestId("home_go").click();
       await page
         .getByText("Registration unavailable for theme test", { exact: false })
         .waitFor();
-      await page.screenshot({ path: `${output}/${brand}-${theme}-error.png` });
+      await page.waitForTimeout(500); // Let form/color transitions settle for review.
+      await page.screenshot({
+        animations: "disabled",
+        path: `${output}/${brand}-${theme}-error.png`,
+      });
       await page.reload();
       await page.getByTestId("home_callName").waitFor();
       assert.equal(

@@ -13,7 +13,7 @@ if (manifest.version !== 1 || !manifest.brands.includes("letro"))
 const revision = execFileSync("git", ["rev-parse", "HEAD"], {
   encoding: "utf8",
 }).trim();
-const version = process.env.LETRO_CALL_VERSION || "0.25.0-letro.1";
+const version = process.env.LETRO_CALL_VERSION || "0.25.0-letro.2";
 if (!/^\d+\.\d+\.\d+-letro\.\d+$/.test(version))
   throw new Error("Expected a Letro prerelease version");
 rmSync("letro-packages", { recursive: true, force: true });

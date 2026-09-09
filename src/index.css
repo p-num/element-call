@@ -17,7 +17,8 @@ Please see LICENSE in the repository root for full details.
 @import url("@fontsource/inconsolata/700.css");
 
 @import url("normalize.css/normalize.css") layer(normalize);
-@import url("@vector-im/compound-design-tokens/assets/web/css/compound-design-tokens.css") layer(compound);
+@import url("@vector-im/compound-design-tokens/assets/web/css/compound-design-tokens.css")
+layer(compound);
 @import url("@vector-im/compound-web/dist/style.css") layer(compound.components);
 
 :root {
@@ -30,7 +31,9 @@ Please see LICENSE in the repository root for full details.
   --font-size-headline: calc(32px * var(--font-scale));
 
   --cpd-color-border-accent: var(--cpd-color-green-800);
-  --call-speaking-gradient: radial-gradient(#0467dd, #0bc491), linear-gradient(0deg, #0467dd 0%, #0bc491 100%);
+  --call-speaking-gradient:
+    radial-gradient(#0467dd, #0bc491),
+    linear-gradient(0deg, #0467dd 0%, #0bc491 100%);
   /* The distance to inset non-full-width content from the edge of the window
   along the inline axis. This ramps up from 16px for typical mobile windows, to
   96px for typical desktop windows, and accounts for the safe area. */
@@ -236,5 +239,17 @@ body[data-call-brand="letro"][data-background="gradient"]::before {
 @media (forced-colors: active) {
   body[data-call-brand="letro"] {
     --call-speaking-gradient: linear-gradient(Highlight, Highlight);
+  }
+}
+
+/* Browser-native focus colors must use the same reviewed brand token. */
+body[data-call-brand="letro"] :focus-visible {
+  outline: 2px solid var(--call-focus);
+  outline-offset: 2px;
+}
+
+@media (forced-colors: active) {
+  body[data-call-brand="letro"] :focus-visible {
+    outline-color: Highlight;
   }
 }
