@@ -40,3 +40,5 @@ writeFileSync(
   "letro-packages/source.json",
   JSON.stringify({ revision, version, contract: manifest }, null, 2),
 );
+
+execFileSync("zip", ["-qr", "../../element-call-assets.zip", "element-call"], { cwd: "letro-packages/android/assets" });
