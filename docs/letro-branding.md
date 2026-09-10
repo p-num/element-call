@@ -26,11 +26,11 @@ A developer-supplied custom call URL must serve this contract too.
 
 Sources inspected at these client commits:
 
-| Client | Commit | Source | Primary/accent |
-| --- | --- | --- | --- |
-| iOS | 20371065d | ElementX/Sources/Letro/Extensions/SwiftUIExtensions.swift and CompoundExtensions.swift | #F32D1B; gradient #CB2000 → #F7B000 |
-| Android | 0f30925145 | libraries/designsystem/.../theme/ElementThemeApp.kt | #BC4500; hover/text #9B2200 |
-| Web | 3652e89d86 | apps/web/res/themes/letro-light/css/_light.pcss | #E73825; text #C62617; stronger text #7E1107 |
+| Client  | Commit     | Source                                                                                 | Primary/accent                               |
+| ------- | ---------- | -------------------------------------------------------------------------------------- | -------------------------------------------- |
+| iOS     | 20371065d  | ElementX/Sources/Letro/Extensions/SwiftUIExtensions.swift and CompoundExtensions.swift | #F32D1B; gradient #CB2000 → #F7B000          |
+| Android | 0f30925145 | libraries/designsystem/.../theme/ElementThemeApp.kt                                    | #BC4500; hover/text #9B2200                  |
+| Web     | 3652e89d86 | apps/web/res/themes/letro-light/css/_light.pcss                                        | #E73825; text #C62617; stronger text #7E1107 |
 
 The platforms do **not** have one matching palette. The current iOS primary
 #F32D1B defines the decorative primary role. Its existing #CB2000 gradient stop
@@ -55,14 +55,14 @@ Letro light host theme; the shared Call bundle provides both appearances.
 
 ## Surfaces to validate
 
-| Surface | Shared theme dependencies |
-| --- | --- |
+| Surface                                             | Shared theme dependencies                                |
+| --------------------------------------------------- | -------------------------------------------------------- |
 | Prejoin, permissions, connecting, incoming/outgoing | canvas, page gradient, accent actions, connecting status |
-| Active call, participant tiles and speaking | tile, text, speaking ring, avatar palette |
-| Controls and focus | action backgrounds, icon/on-accent pairs, focus border |
-| Menus, dialogs, errors and device selection | surface, elevated, text, status and destructive tokens |
-| Screen sharing and earpiece overlay | existing control/overlay tokens and call lifecycle |
-| Login, register, header and footer | brand-selected wordmark and accessible product name |
+| Active call, participant tiles and speaking         | tile, text, speaking ring, avatar palette                |
+| Controls and focus                                  | action backgrounds, icon/on-accent pairs, focus border   |
+| Menus, dialogs, errors and device selection         | surface, elevated, text, status and destructive tokens   |
+| Screen sharing and earpiece overlay                 | existing control/overlay tokens and call lifecycle       |
+| Login, register, header and footer                  | brand-selected wordmark and accessible product name      |
 
 Do not infer call or device correctness from a color/token test. Capture the
 above states on iOS, Android and Web, in both appearances and high contrast.
