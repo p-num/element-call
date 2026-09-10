@@ -11,6 +11,7 @@ for (const theme of ["light", "dark"]) {
   test(`Start a branded call then leave (${theme})`, async ({
     page,
   }, testInfo) => {
+    await page.emulateMedia({ reducedMotion: "reduce" });
     await page.goto(`/#?brand=letro&theme=${theme}`);
     await expect(page).toHaveTitle(/^Letro/);
 
@@ -62,6 +63,16 @@ for (const theme of ["light", "dark"]) {
     // We should still be able to send reactions at this screen size
     await expect(page.getByRole("button", { name: "Reactions" })).toBeVisible();
 
+    await expect(page.getByTestId("settings-bottom-center")).toBeInViewport({
+      ratio: 1,
+    });
+    await expect(page.getByTestId("incall_leave")).toBeInViewport({ ratio: 1 });
+    await expect(page.locator("video")).toBeInViewport({ ratio: 1 });
+    await expect
+      .poll(async () =>
+        page.evaluate(() => document.documentElement.scrollWidth),
+      )
+      .toBeLessThanOrEqual(350);
     await testInfo.attach("letro-mobile-active", {
       body: await page.screenshot(),
       contentType: "image/png",
