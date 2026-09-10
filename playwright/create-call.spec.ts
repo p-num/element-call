@@ -23,13 +23,13 @@ for (const theme of ["light", "dark"]) {
     await expect(page.locator("video")).toBeVisible();
     await expect(page.getByTestId("lobby_joinCall")).toBeVisible();
 
+    await expect(page.locator("body")).toHaveClass(
+      new RegExp(`cpd-theme-${theme}`),
+    );
     await testInfo.attach("letro-prejoin", {
       body: await page.screenshot(),
       contentType: "image/png",
     });
-    await page.reload();
-    await expect(page.getByTestId("lobby_joinCall")).toBeVisible();
-    await expect(page).toHaveTitle(/^Letro/);
     // Check the button toolbar
     // await expect(page.getByRole('switch', { name: 'Mute microphone' })).toBeVisible();
     // await expect(page.getByRole('switch', { name: 'Stop video' })).toBeVisible();
@@ -50,6 +50,9 @@ for (const theme of ["light", "dark"]) {
     // The tooltip with the name should be visible
     await expect(page.getByTestId("name_tag")).toContainText("John Doe");
 
+    await expect(page.locator("body")).toHaveClass(
+      new RegExp(`cpd-theme-${theme}`),
+    );
     await testInfo.attach("letro-active", {
       body: await page.screenshot(),
       contentType: "image/png",
@@ -75,6 +78,13 @@ for (const theme of ["light", "dark"]) {
     await expect(
       page.getByRole("link", { name: "Not now, return to home screen" }),
     ).toBeVisible();
+    await page
+      .getByRole("link", { name: "Not now, return to home screen" })
+      .click();
+    await page.getByTestId("home_callName").waitFor();
+    await page.reload();
+    await page.getByTestId("home_callName").waitFor();
+    await expect(page).toHaveTitle(/^Letro/);
   });
 }
 
