@@ -1,0 +1,40 @@
+name: Validate Letro Call bundles
+on:
+  pull_request:
+  push:
+    branches: [letro, letro-call-theme]
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version-file: .node-version
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile --ignore-pnpmfile
+      - run: node --test scripts/tests/brand-theme.test.mjs
+      - run: pnpm lint:types
+      - run: pnpm test:unit --run src/UrlParams.test.ts src/useTheme.test.ts src/branding/brand.test.ts
+      - run: pnpm build:embedded
+      - run: node scripts/package-letro.mjs
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: letro-call-embedded
+          path: |
+            dist
+            letro-packages/source.json
+      - run: pnpm build:full
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: letro-call-full
+          path: dist
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: node scripts/tests/brand-browser.mjs dist
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: letro-call-screenshots
+          path: test-results/letro-branding

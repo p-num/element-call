@@ -38,3 +38,7 @@ yarn-error.log
 
 *storybook.log
 storybook-static
+
+# Generated from the typed brand contract whenever Vite starts.
+/src/branding/generated.css
+/letro-packages/

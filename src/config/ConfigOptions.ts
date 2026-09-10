@@ -25,6 +25,8 @@ export enum MatrixRTCMode {
 }
 
 export interface ConfigOptions {
+  /** Bundled call theme; omitted or unrecognised values preserve Element. */
+  brand?: "element" | "letro";
   /**
    * The Posthog endpoint to which analytics data will be sent.
    * This is only used in the full package of Element Call.

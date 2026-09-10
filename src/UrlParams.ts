@@ -15,6 +15,8 @@ import {
 } from "matrix-js-sdk/lib/matrixrtc";
 import { pickBy } from "lodash-es";
 
+import { parseBrand, type CallBrand } from "./branding/theme";
+
 import { Config } from "./config/Config";
 import { type EncryptionSystem } from "./e2ee/sharedKeyManagement";
 import { E2eeType } from "./e2ee/e2eeType";
@@ -150,6 +152,8 @@ export interface UrlProperties {
    * can be "light", "dark", "light-high-contrast" or "dark-high-contrast".
    */
   theme: string | null;
+  /** Allowlisted call branding, independent of light/dark appearance. */
+  brand: CallBrand | null;
   /**
    * The visual style of the page background.
    */
@@ -461,6 +465,10 @@ export const computeUrlParams = (search = "", hash = ""): UrlParams => {
     fonts: parser.getAllParams("font"),
     fontScale: Number.isNaN(fontScale) ? null : fontScale,
     theme: parser.getParam("theme"),
+    brand:
+      parser.getParam("brand") === null
+        ? null
+        : parseBrand(parser.getParam("brand")),
     background:
       parser.getEnumParam("background", BackgroundStyle) ??
       BackgroundStyle.Gradient,

@@ -26,6 +26,21 @@ const HOMESERVER = "localhost";
 mockConfig();
 
 describe("UrlParams", () => {
+  it.each(["light", "dark", "light-high-contrast", "dark-high-contrast"])(
+    "selects brand independently of %s",
+    (theme) => {
+      expect(
+        computeUrlParams("", `#?brand=letro&theme=${theme}`),
+      ).toMatchObject({ brand: "letro", theme });
+    },
+  );
+  it("preserves Element as the default and rejects CSS URLs", () => {
+    expect(computeUrlParams("", "").brand).toBeNull();
+    expect(
+      computeUrlParams("", "#?brand=https://example.com/theme.css").brand,
+    ).toBe("element");
+  });
+
   describe("handles URL with /room/", () => {
     it("and nothing else", () => {
       expect(

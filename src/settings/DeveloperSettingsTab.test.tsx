@@ -29,6 +29,7 @@ import { mockConfig } from "../utils/test";
 
 // Mock url params hook to avoid environment-dependent snapshot churn.
 vi.mock("../UrlParams", () => ({
+  getUrlParams: () => ({ brand: null }),
   useUrlParams: (): { mocked: boolean; answer: number } => ({
     mocked: true,
     answer: 42,

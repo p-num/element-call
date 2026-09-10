@@ -10,6 +10,7 @@ import { WidgetApiToWidgetAction } from "matrix-widget-api";
 import { type IThemeChangeActionRequest } from "matrix-widget-api";
 
 import { getUrlParams } from "./UrlParams";
+import { getCallBrand } from "./branding/brand";
 import { widget } from "./widget";
 
 export const useTheme = (): void => {
@@ -40,6 +41,7 @@ export const useTheme = (): void => {
   }, []);
 
   useLayoutEffect(() => {
+    document.body.dataset.callBrand = getCallBrand();
     // If no theme has been explicitly requested we default to dark
     const theme = requestedTheme?.includes("light") ? "light" : "dark";
     const themeHighContrast = requestedTheme?.includes("high-contrast")

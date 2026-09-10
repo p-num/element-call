@@ -1,0 +1,8 @@
+.letro {
+  display: inline-block;
+  width: 168px;
+  aspect-ratio: 168 / 34;
+  max-width: 100%;
+  background: var(--call-accent);
+  mask: url("./letro-wordmark.png") center / contain no-repeat;
+}

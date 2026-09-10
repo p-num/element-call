@@ -16,6 +16,12 @@ import { createRoot } from "react-dom/client";
 import "./index.css";
 import { logger } from "matrix-js-sdk/lib/logger";
 
+import {
+  initializeCallBrand,
+  getCallBrand,
+  getProductName,
+} from "./branding/brand";
+import { Config } from "./config/Config";
 import { App } from "./App";
 import { init as initRageshake } from "./settings/rageshake";
 import { Initializer } from "./initializer";
@@ -48,7 +54,11 @@ if (fatalError !== null) {
 }
 
 Initializer.initBeforeReact()
-  .then(() => {
+  .then(async () => {
+    await Config.init();
+    initializeCallBrand(Config.get().brand);
+    document.body.dataset.callBrand = getCallBrand();
+    document.title = getProductName();
     root.render(
       <StrictMode>
         <App vm={new AppViewModel(globalScope)} />
