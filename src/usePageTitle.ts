@@ -6,10 +6,11 @@ Please see LICENSE in the repository root for full details.
 */
 
 import { useEffect } from "react";
+import { getProductName } from "./branding/brand";
 
 export function usePageTitle(title?: string): void {
   useEffect(() => {
-    const productName = import.meta.env.VITE_PRODUCT_NAME || "Element Call";
+    const productName = getProductName();
     document.title = title ? `${productName} | ${title}` : productName;
   }, [title]);
 }

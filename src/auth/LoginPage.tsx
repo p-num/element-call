@@ -5,6 +5,8 @@ SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Element-Commercial
 Please see LICENSE in the repository root for full details.
 */
 
+import { getCallBrand, getProductName } from "../branding/brand";
+
 import { type FC, type FormEvent, useCallback, useRef, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { Trans, useTranslation } from "react-i18next";
@@ -94,7 +96,11 @@ export const LoginPage: FC = () => {
             />
 
             <h2>{t("log_in")}</h2>
-            <h4>{t("login_subheading")}</h4>
+            <h4>
+              {getCallBrand() === "letro"
+                ? t("branding.login", { brand: getProductName() })
+                : t("login_subheading")}
+            </h4>
             <form onSubmit={onSubmitLoginForm}>
               <FieldRow>
                 <InputField

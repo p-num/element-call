@@ -8,6 +8,7 @@ Please see LICENSE in the repository root for full details.
 import { t } from "i18next";
 import { type ConnectionError } from "livekit-client";
 
+import { getProductName } from "../branding/brand";
 import { i18nKey } from "./i18n";
 
 export enum ErrorCode {
@@ -83,7 +84,7 @@ export class MatrixRTCTransportMissingError extends ElementCallError {
       ErrorCategory.CONFIGURATION_ISSUE,
       t("error.matrix_rtc_transport_missing", {
         domain,
-        brand: import.meta.env.VITE_PRODUCT_NAME || "Element Call",
+        brand: getProductName(),
         errorCode: ErrorCode.MISSING_MATRIX_RTC_TRANSPORT,
       }),
     );
