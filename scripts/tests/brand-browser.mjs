@@ -123,8 +123,12 @@ try {
           .filter(Boolean)
           .join(" ");
         element.style.cssText =
-          "position:fixed;left:40px;top:40px;width:200px;height:120px;isolation:isolate;background:var(--cpd-color-bg-canvas-default);border-radius:16px";
-        element.textContent = "Speaking participant";
+          "position:fixed;left:40px;top:180px;width:200px;height:120px;isolation:isolate;background:var(--cpd-color-bg-canvas-default);border-radius:16px";
+        const content = document.createElement("div");
+        content.style.cssText =
+          "height:100%;box-sizing:border-box;padding:16px;border-radius:16px;background:var(--cpd-color-bg-canvas-default);color:var(--cpd-color-text-primary)";
+        content.textContent = "Speaking participant";
+        element.append(content);
         document.body.append(element);
         return element;
       });
@@ -134,8 +138,13 @@ try {
       );
       assert.equal(border.includes("13, 92, 189"), brand === "element");
       assert.notEqual(border, "none");
+      if (brand === "letro")
+        assert.match(
+          border,
+          theme.startsWith("dark") ? /252, 206, 202/ : /126, 17, 7/,
+        );
       await page.screenshot({
-        clip: { x: 30, y: 30, width: 220, height: 140 },
+        clip: { x: 30, y: 170, width: 220, height: 140 },
         path: `${output}/${brand}-${theme}-speaking.png`,
         animations: "disabled",
       });
