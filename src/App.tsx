@@ -26,6 +26,7 @@ import { ClientProvider } from "./ClientContext";
 import { ErrorPage, LoadingPage } from "./FullScreenView";
 import { Initializer } from "./initializer";
 import { widget } from "./widget";
+import { useCallBrand } from "./branding/useCallBrand";
 import { useTheme } from "./useTheme";
 import { ProcessorProvider } from "./livekit/TrackProcessorContext";
 import { type AppViewModel } from "./state/AppViewModel";
@@ -54,6 +55,7 @@ const BackgroundProvider: FC<SimpleProviderProps> = ({ children }) => {
 
 const ThemeProvider: FC<SimpleProviderProps> = ({ children }) => {
   useTheme();
+  useCallBrand();
   return children;
 };
 

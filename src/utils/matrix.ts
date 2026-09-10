@@ -22,6 +22,7 @@ import { sleep } from "matrix-js-sdk/lib/utils";
 import type { ICreateClientOpts, MatrixClient, Room } from "matrix-js-sdk";
 import IndexedDBWorker from "../IndexedDBWorker?worker";
 import { generateUrlSearchParams, getUrlParams } from "../UrlParams";
+import { getNavigationBrand } from "../branding/brand";
 import { Config } from "../config/Config";
 import { E2eeType } from "../e2ee/e2eeType";
 import {
@@ -334,7 +335,10 @@ export function getRelativeRoomUrl(
   const roomPart = roomName
     ? "/" + roomAliasLocalpartFromRoomName(roomName)
     : "";
-  return `/room/#${roomPart}?${generateUrlSearchParams(roomId, encryptionSystem, viaServers).toString()}`;
+  const params = generateUrlSearchParams(roomId, encryptionSystem, viaServers);
+  const brand = getNavigationBrand();
+  if (brand !== null) params.set("brand", brand);
+  return `/room/#${roomPart}?${params}`;
 }
 
 /**

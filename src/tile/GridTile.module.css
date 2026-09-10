@@ -32,7 +32,8 @@ borders don't support gradients */
 }
 
 .tile.speaking::before {
-  background:
+  background: var(
+    --call-grid-speaking-gradient,
     linear-gradient(
       119deg,
       rgba(13, 92, 189, 0.7) 0%,
@@ -42,7 +43,8 @@ borders don't support gradients */
       180deg,
       rgba(13, 92, 189, 0.9) 0%,
       rgba(13, 189, 168, 0.9) 100%
-    );
+    )
+  );
   opacity: 1;
 }
 

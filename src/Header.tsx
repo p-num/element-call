@@ -5,6 +5,8 @@ SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Element-Commercial
 Please see LICENSE in the repository root for full details.
 */
 
+import { getCallBrand, getProductName } from "./branding/brand";
+
 import classNames from "classnames";
 import { type Ref, type FC, type HTMLAttributes, type ReactNode } from "react";
 import { Link } from "react-router-dom";
@@ -120,7 +122,11 @@ export const HeaderLogo: FC<HeaderLogoProps> = ({ className }) => {
     <Link
       className={classNames(styles.headerLogo, className)}
       to="/"
-      aria-label={t("header_label")}
+      aria-label={
+        getCallBrand() === "letro"
+          ? t("branding.home", { brand: getProductName() })
+          : t("header_label")
+      }
     >
       <BrandLogo element={Logo} />
     </Link>

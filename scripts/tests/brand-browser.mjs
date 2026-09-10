@@ -18,7 +18,7 @@ const server = createServer(async (request, response) => {
   const pathname = new URL(request.url, "http://localhost").pathname;
   const path = resolve(
     root,
-    "." + (pathname === "/" ? "/index.html" : pathname),
+    "." + (pathname === "/" || !extname(pathname) ? "/index.html" : pathname),
   );
   if (!path.startsWith(root + "/")) {
     response.writeHead(403).end();
@@ -97,12 +97,49 @@ try {
         await page.locator("body").getAttribute("data-call-brand"),
         brand,
       );
+      assert.match(
+        await page.title(),
+        brand === "letro" ? /^Letro(?: \||$)/ : /^Element Call(?: \||$)/,
+      );
       const accent = await page
         .locator("body")
         .evaluate((el) =>
           getComputedStyle(el).getPropertyValue("--call-accent").trim(),
         );
       assert.equal(Boolean(accent), brand === "letro");
+      // Render the shipped grid CSS with a speaking state, without a live account.
+      const tile = await page.evaluateHandle(() => {
+        const rules = [...document.styleSheets].flatMap((sheet) => [
+          ...sheet.cssRules,
+        ]);
+        const rule = rules.find((rule) =>
+          rule.style?.background.includes("--call-grid-speaking-gradient"),
+        );
+        if (!rule) throw new Error("Missing shipped speaking tile CSS");
+        const element = document.createElement("div");
+        element.className = rule.selectorText
+          .replace("::before", "")
+          .split(".")
+          .filter(Boolean)
+          .join(" ");
+        element.style.cssText =
+          "position:fixed;left:40px;top:40px;width:200px;height:120px;isolation:isolate;background:var(--cpd-color-bg-canvas-default);border-radius:16px";
+        element.textContent = "Speaking participant";
+        document.body.append(element);
+        return element;
+      });
+      await page.waitForTimeout(200);
+      const border = await tile.evaluate(
+        (el) => getComputedStyle(el, "::before").backgroundImage,
+      );
+      assert.equal(border.includes("13, 92, 189"), brand === "element");
+      assert.notEqual(border, "none");
+      await page.screenshot({
+        clip: { x: 30, y: 30, width: 220, height: 140 },
+        path: `${output}/${brand}-${theme}-speaking.png`,
+        animations: "disabled",
+      });
+      await tile.evaluate((el) => el.remove());
       await page.getByTestId("home_callName").fill("Theme preview");
       await page.getByTestId("home_displayName").fill("Preview participant");
       await page.getByTestId("home_go").focus();
@@ -133,6 +170,24 @@ try {
         await page.locator("body").getAttribute("data-call-brand"),
         brand,
       );
+      assert.match(
+        await page.title(),
+        brand === "letro" ? /^Letro(?: \||$)/ : /^Element Call(?: \||$)/,
+      );
+      if (brand === "letro") {
+        assert.match(
+          await page.locator('link[rel="icon"]').getAttribute("href"),
+          /letro-icon|data:image\/png/,
+        );
+        await page.getByRole("link", { name: "Log In", exact: true }).click();
+        await page.getByText("To continue to Letro", { exact: true }).waitFor();
+        await page.reload();
+        await page.getByText("To continue to Letro", { exact: true }).waitFor();
+        assert.equal(
+          await page.locator("body").getAttribute("data-call-brand"),
+          "letro",
+        );
+      }
       console.log(
         `${brand}/${theme}: built screen, focus, error and reload passed`,
       );

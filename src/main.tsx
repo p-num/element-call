@@ -21,6 +21,7 @@ import {
   getCallBrand,
   getProductName,
 } from "./branding/brand";
+import letroIcon from "./branding/letro-icon.png";
 import { Config } from "./config/Config";
 import { App } from "./App";
 import { init as initRageshake } from "./settings/rageshake";
@@ -59,6 +60,13 @@ Initializer.initBeforeReact()
     initializeCallBrand(Config.get().brand);
     document.body.dataset.callBrand = getCallBrand();
     document.title = getProductName();
+    if (getCallBrand() === "letro") {
+      const icon = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
+      if (icon) {
+        icon.href = letroIcon;
+        icon.type = "image/png";
+      }
+    }
     root.render(
       <StrictMode>
         <App vm={new AppViewModel(globalScope)} />

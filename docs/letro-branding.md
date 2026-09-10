@@ -13,8 +13,13 @@ select light, dark, light-high-contrast and dark-high-contrast independently.
 Standalone deployments set `"brand": "letro"` in config.json. A URL selection
 overrides that configuration. Absent, misspelled or non-string identifiers use
 Element. There are no external stylesheets, CSS payloads, or post-load host CSS.
-Brand selection lasts for the app instance, including router navigation.
-Standalone config.json preserves it across navigation followed by reload.
+Brand selection is cached for the app instance and retained in routed/shared
+URLs, including an explicit Element override, so navigation followed by reload
+preserves the choice. Default Element URLs remain unchanged. The favicon uses
+the existing iOS app-logo asset; upstream icons remain the default. New Letro
+login/home labels fall back to English until translated. Static social-preview
+metadata remains build-time configuration (`VITE_PRODUCT_NAME`); crawlers do
+not execute URL-selected runtime branding.
 
 `src/branding/theme.ts` is the canonical palette and public semantic mapping.
 Vite generates the stylesheet at build/start time; generated.css is ignored.

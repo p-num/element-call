@@ -132,6 +132,7 @@ export function compoundTokens(appearance: Appearance): Record<string, string> {
   result["--video-tile-background"] = "var(--call-tile)";
   result["--call-speaking-gradient"] =
     "linear-gradient(var(--call-speaking), var(--call-speaking))";
+  result["--call-grid-speaking-gradient"] = "var(--call-speaking-gradient)";
   result["--call-page-background"] = appearance.endsWith("hc")
     ? "none"
     : "radial-gradient(ellipse at bottom, color-mix(in srgb, var(--call-gradient-end) 12%, transparent), transparent 65%)";
