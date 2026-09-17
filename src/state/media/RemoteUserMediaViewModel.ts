@@ -9,6 +9,7 @@ Please see LICENSE in the repository root for full details.
 import { type RemoteParticipant } from "livekit-client";
 import { combineLatest, map, of, switchMap } from "rxjs";
 
+import { setRemoteAudioVolume } from "../../livekit/RemoteAudioVolume";
 import { type Behavior } from "../Behavior";
 import { createVolumeControls, type VolumeControls } from "../VolumeControls";
 import {
@@ -50,7 +51,9 @@ export function createRemoteUserMedia(
     ...createVolumeControls(scope, {
       pretendToBeDisconnected$,
       sink$: scope.behavior(
-        inputs.participant$.pipe(map((p) => (volume) => p?.setVolume(volume))),
+        inputs.participant$.pipe(
+          map((p) => (volume) => setRemoteAudioVolume(p, volume)),
+        ),
       ),
     }),
     local: false,

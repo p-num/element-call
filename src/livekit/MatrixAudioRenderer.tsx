@@ -5,20 +5,23 @@ SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Element-Commercial
 Please see LICENSE in the repository root for full details.
 */
 
-import { getTrackReferenceId } from "@livekit/components-core";
-import { type Room as LivekitRoom } from "livekit-client";
-import { type RemoteAudioTrack, Track } from "livekit-client";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
-  useTracks,
-  AudioTrack,
-  type AudioTrackProps,
-} from "@livekit/components-react";
+  getTrackReferenceId,
+  type TrackReference,
+} from "@livekit/components-core";
+import { type Room as LivekitRoom } from "livekit-client";
+import {
+  RemoteAudioTrack,
+  RemoteTrackPublication,
+  Track,
+} from "livekit-client";
+import { useEffect, useState, type ReactNode } from "react";
+import { useTracks, AudioTrack } from "@livekit/components-react";
 import { logger as rootLogger } from "matrix-js-sdk/lib/logger";
 
 import { useEarpieceAudioConfig } from "../MediaDevicesContext";
-import { useReactiveState } from "../useReactiveState";
 import * as controls from "../controls";
+import { observeRemoteAudioVolume } from "./RemoteAudioVolume";
 
 export interface MatrixAudioRendererProps {
   /**
@@ -90,121 +93,117 @@ export function LivekitRoomAudioRenderer({
       return true;
     });
 
-  // This component is also (in addition to the "only play audio for connected members" logic above)
-  // responsible for mimicking earpiece audio on iPhones.
-  // The Safari audio devices enumeration does not expose an earpiece audio device.
-  // We alternatively use the audioContext pan node to only use one of the stereo channels.
+  const { pan, volume } = useEarpieceAudioConfig();
+  const useEarpiece = pan !== 0;
+  const [audioContext, setAudioContext] = useState<AudioContext>();
 
-  // This component does get additionally complicated because of a Safari bug.
-  // (see: https://bugs.webkit.org/show_bug.cgi?id=251532
-  // and the related issues: https://bugs.webkit.org/show_bug.cgi?id=237878
-  // and https://bugs.webkit.org/show_bug.cgi?id=231105)
-  //
-  // AudioContext gets stopped if the webview gets moved into the background.
-  // Once the phone is in standby audio playback will stop.
-  // So we can only use the pan trick only works is the phone is not in standby.
-  // If earpiece mode is not used we do not use audioContext to allow standby playback.
-  // shouldUseAudioContext is set to false if stereoPan === 0 to allow standby bluetooth playback.
-
-  const { pan: stereoPan, volume: volumeFactor } = useEarpieceAudioConfig();
-  const shouldUseAudioContext = stereoPan !== 0;
-
-  // initialize the potentially used audio context.
-  const [audioContext, setAudioContext] = useState<AudioContext | undefined>(
-    undefined,
-  );
   useEffect(() => {
-    const ctx = new AudioContext();
-    setAudioContext(ctx);
-    return (): void => {
-      void ctx.close();
+    if (!useEarpiece) return;
+    const logger = rootLogger.getChild("[MatrixAudioRenderer]");
+    const context = new AudioContext();
+    setAudioContext(context);
+    const resume = (): void => {
+      if (!document.hidden && context.state !== "running") {
+        void context.resume().catch((error) => {
+          logger.warn("Unable to resume handset audio", error);
+        });
+      }
     };
-  }, []);
-  const audioNodes = useMemo(
-    () => ({
-      gain: audioContext?.createGain(),
-      pan: audioContext?.createStereoPanner(),
-    }),
-    [audioContext],
-  );
+    document.addEventListener("visibilitychange", resume);
+    return (): void => {
+      document.removeEventListener("visibilitychange", resume);
+      setAudioContext(undefined);
+      void context.close().catch((error) => {
+        logger.warn("Unable to close handset audio", error);
+      });
+    };
+  }, [useEarpiece]);
 
-  // Simple effects to update the gain and pan node based on the props
   useEffect(() => {
-    if (audioNodes.pan) audioNodes.pan.pan.value = stereoPan;
-  }, [audioNodes.pan, stereoPan]);
-  useEffect(() => {
-    if (audioNodes.gain) audioNodes.gain.gain.value = volumeFactor;
-  }, [audioNodes.gain, volumeFactor]);
+    if (tracks.length > 0) controls.setPlaybackStarted();
+  }, [tracks.length]);
 
   return (
-    // We add all audio elements into one <div> for the browser developer tool experience/tidyness.
     <div style={{ display: "none" }}>
-      {tracks.map((trackRef) => (
-        <AudioTrackWithAudioNodes
-          key={getTrackReferenceId(trackRef)}
-          trackRef={trackRef}
-          muted={muted}
-          audioContext={shouldUseAudioContext ? audioContext : undefined}
-          audioNodes={audioNodes}
-        />
-      ))}
+      {tracks.map((trackRef) =>
+        useEarpiece ? (
+          <EarpieceAudioTrack
+            key={getTrackReferenceId(trackRef)}
+            trackRef={trackRef}
+            audioContext={audioContext}
+            pan={pan}
+            volume={volume}
+            muted={muted}
+          />
+        ) : (
+          // Keep HTML playback for speaker/headsets: WebAudio can be suspended
+          // in standby on iOS (WebKit #251532).
+          <AudioTrack
+            key={getTrackReferenceId(trackRef)}
+            trackRef={trackRef}
+            muted={muted}
+          />
+        ),
+      )}
     </div>
   );
 }
 
-interface StereoPanAudioTrackProps {
-  muted?: boolean;
-  audioContext?: AudioContext;
-  audioNodes: {
-    gain?: GainNode;
-    pan?: StereoPannerNode;
-  };
-}
-
 /**
- * This wraps `livekit.AudioTrack` to allow adding audio nodes to a track.
- * It main purpose is to remount the AudioTrack component when switching from
- * audioContext to normal audio playback.
- * As of now the AudioTrack component does not support adding audio nodes while being mounted.
- * @param props The component props
- * @param props.trackRef The track reference
- * @param props.muted If the track should be muted
- * @param props.audioContext The audio context to use
- * @param props.audioNodes The audio nodes to use
- * @returns
+ * Own handset playback exclusively. Attaching an HTML audio element as well
+ * lets LiveKit.startAudio or React unmute a full-volume path on iOS, where
+ * HTMLMediaElement.volume cannot attenuate playback.
  */
-function AudioTrackWithAudioNodes({
+function EarpieceAudioTrack({
   trackRef,
-  muted,
   audioContext,
-  audioNodes,
-  ...props
-}: StereoPanAudioTrackProps &
-  AudioTrackProps &
-  React.RefAttributes<HTMLAudioElement>): ReactNode {
-  // This is used to unmount/remount the AudioTrack component.
-  // Mounting needs to happen after the audioContext is set.
-  // (adding the audio context when already mounted did not work outside strict mode)
-  const [trackReady, setTrackReady] = useReactiveState(
-    () => false,
-    // We only want the track to reset once both (audioNodes and audioContext) are set.
-    // for unsetting the audioContext its enough if one of the two is undefined.
-    [audioContext && audioNodes],
-  );
+  pan,
+  volume,
+  muted,
+}: {
+  trackRef: TrackReference;
+  audioContext?: AudioContext;
+  pan: number;
+  volume: number;
+  muted?: boolean;
+}): ReactNode {
+  const publication = trackRef.publication;
+  const track = publication.track;
+  const { participant, source: trackSource } = trackRef;
 
   useEffect(() => {
-    if (!trackRef || trackReady) return;
-    const track = trackRef.publication.track as RemoteAudioTrack;
-    const useContext = audioContext && audioNodes.gain && audioNodes.pan;
-    track.setAudioContext(useContext ? audioContext : undefined);
-    track.setWebAudioPlugins(
-      useContext ? [audioNodes.gain!, audioNodes.pan!] : [],
-    );
-    setTrackReady(true);
-    controls.setPlaybackStarted();
-  }, [audioContext, audioNodes, setTrackReady, trackReady, trackRef]);
+    if (publication instanceof RemoteTrackPublication && muted !== undefined) {
+      publication.setEnabled(!muted);
+    }
+  }, [publication, muted]);
 
-  return (
-    trackReady && <AudioTrack trackRef={trackRef} muted={muted} {...props} />
-  );
+  useEffect(() => {
+    if (!audioContext || !(track instanceof RemoteAudioTrack) || muted) return;
+    const source = audioContext.createMediaStreamSource(
+      new MediaStream([track.mediaStreamTrack]),
+    );
+    const gain = audioContext.createGain();
+    const panner = audioContext.createStereoPanner();
+    const volumeSubscription = observeRemoteAudioVolume(
+      participant,
+      trackSource,
+    ).subscribe((requestedVolume) => {
+      gain.gain.value = volume * requestedVolume;
+    });
+    panner.pan.value = pan;
+    source.connect(gain).connect(panner).connect(audioContext.destination);
+    void audioContext.resume().catch((error) => {
+      rootLogger
+        .getChild("[MatrixAudioRenderer]")
+        .warn("Unable to start handset audio", error);
+    });
+    return (): void => {
+      volumeSubscription.unsubscribe();
+      source.disconnect();
+      gain.disconnect();
+      panner.disconnect();
+    };
+  }, [audioContext, track, participant, trackSource, pan, volume, muted]);
+
+  return null;
 }
