@@ -25,6 +25,7 @@ import {
   mockRemoteScreenShare,
 } from "../../utils/test";
 import { constant } from "../Behavior";
+import { observeRemoteAudioVolume } from "../../livekit/RemoteAudioVolume";
 
 global.MediaStreamTrack = class {} as unknown as {
   new (): MediaStreamTrack;
@@ -44,119 +45,46 @@ vi.mock("../../Platform", () => ({
 
 const rtcMembership = mockRtcMembership("@alice:example.org", "AAAA");
 
-test("control a participant's volume", () => {
-  const setVolumeSpy = vi.fn();
-  const vm = mockRemoteMedia(
-    rtcMembership,
-    {},
-    mockRemoteParticipant({ setVolume: setVolumeSpy }),
-  );
+test.each([
+  { source: Track.Source.Microphone, createMedia: mockRemoteMedia },
+  {
+    source: Track.Source.ScreenShareAudio,
+    createMedia: mockRemoteScreenShare,
+  },
+])("control a participant's $source volume", ({ source, createMedia }) => {
+  const participant = mockRemoteParticipant({});
+  const vm = createMedia(rtcMembership, {}, participant);
   withTestScheduler(({ expectObservable, schedule }) => {
     schedule("-ab---c---d|", {
       a() {
         // Try muting by toggling
         vm.togglePlaybackMuted();
-        expect(setVolumeSpy).toHaveBeenLastCalledWith(0);
       },
       b() {
         // Try unmuting by dragging the slider back up
         vm.adjustPlaybackVolume(0.6);
         vm.adjustPlaybackVolume(0.8);
         vm.commitPlaybackVolume();
-        expect(setVolumeSpy).toHaveBeenCalledWith(0.6);
-        expect(setVolumeSpy).toHaveBeenLastCalledWith(0.8);
       },
       c() {
         // Try muting by dragging the slider back down
         vm.adjustPlaybackVolume(0.2);
         vm.adjustPlaybackVolume(0);
         vm.commitPlaybackVolume();
-        expect(setVolumeSpy).toHaveBeenCalledWith(0.2);
-        expect(setVolumeSpy).toHaveBeenLastCalledWith(0);
       },
       d() {
-        // Try unmuting by toggling
+        // Toggling restores the last non-zero committed volume.
         vm.togglePlaybackMuted();
-        // The volume should return to the last non-zero committed volume
-        expect(setVolumeSpy).toHaveBeenLastCalledWith(0.8);
       },
     });
-    expectObservable(vm.playbackVolume$).toBe("ab(cd)(ef)g", {
-      a: 1,
-      b: 0,
-      c: 0.6,
-      d: 0.8,
-      e: 0.2,
-      f: 0,
-      g: 0.8,
-    });
-  });
-});
-
-test("control a participant's screen share volume", () => {
-  const setVolumeSpy = vi.fn();
-  const vm = mockRemoteScreenShare(
-    rtcMembership,
-    {},
-    mockRemoteParticipant({ setVolume: setVolumeSpy }),
-  );
-  withTestScheduler(({ expectObservable, schedule }) => {
-    schedule("-ab---c---d|", {
-      a() {
-        // Try muting by toggling
-        vm.togglePlaybackMuted();
-        expect(setVolumeSpy).toHaveBeenLastCalledWith(
-          0,
-          Track.Source.ScreenShareAudio,
-        );
-      },
-      b() {
-        // Try unmuting by dragging the slider back up
-        vm.adjustPlaybackVolume(0.6);
-        vm.adjustPlaybackVolume(0.8);
-        vm.commitPlaybackVolume();
-        expect(setVolumeSpy).toHaveBeenCalledWith(
-          0.6,
-          Track.Source.ScreenShareAudio,
-        );
-        expect(setVolumeSpy).toHaveBeenLastCalledWith(
-          0.8,
-          Track.Source.ScreenShareAudio,
-        );
-      },
-      c() {
-        // Try muting by dragging the slider back down
-        vm.adjustPlaybackVolume(0.2);
-        vm.adjustPlaybackVolume(0);
-        vm.commitPlaybackVolume();
-        expect(setVolumeSpy).toHaveBeenCalledWith(
-          0.2,
-          Track.Source.ScreenShareAudio,
-        );
-        expect(setVolumeSpy).toHaveBeenLastCalledWith(
-          0,
-          Track.Source.ScreenShareAudio,
-        );
-      },
-      d() {
-        // Try unmuting by toggling
-        vm.togglePlaybackMuted();
-        // The volume should return to the last non-zero committed volume
-        expect(setVolumeSpy).toHaveBeenLastCalledWith(
-          0.8,
-          Track.Source.ScreenShareAudio,
-        );
-      },
-    });
-    expectObservable(vm.playbackVolume$).toBe("ab(cd)(ef)g", {
-      a: 1,
-      b: 0,
-      c: 0.6,
-      d: 0.8,
-      e: 0.2,
-      f: 0,
-      g: 0.8,
-    });
+    const volumes = { a: 1, b: 0, c: 0.6, d: 0.8, e: 0.2, f: 0, g: 0.8 };
+    expectObservable(vm.playbackVolume$).toBe("ab(cd)(ef)g", volumes);
+    // Verify that controls deliver their requested volume to the renderer,
+    // as well as updating their own UI state.
+    expectObservable(observeRemoteAudioVolume(participant, source)).toBe(
+      "ab(cd)(ef)g",
+      volumes,
+    );
   });
 });
 

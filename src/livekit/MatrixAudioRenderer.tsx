@@ -5,23 +5,18 @@ SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Element-Commercial
 Please see LICENSE in the repository root for full details.
 */
 
-import {
-  getTrackReferenceId,
-  type TrackReference,
-} from "@livekit/components-core";
-import { RoomEvent, type Room as LivekitRoom } from "livekit-client";
-import {
-  RemoteAudioTrack,
-  RemoteTrackPublication,
-  Track,
-} from "livekit-client";
-import { useEffect, useState, type ReactNode } from "react";
-import { useTracks, AudioTrack } from "@livekit/components-react";
+import { getTrackReferenceId } from "@livekit/components-core";
+import { RoomEvent, Track, type Room as LivekitRoom } from "livekit-client";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useTracks } from "@livekit/components-react";
 import { logger as rootLogger } from "matrix-js-sdk/lib/logger";
 
 import { useEarpieceAudioConfig } from "../MediaDevicesContext";
 import * as controls from "../controls";
-import { observeRemoteAudioVolume } from "./RemoteAudioVolume";
+import {
+  RemoteAudioPlayback,
+  type RemoteAudioOutput,
+} from "./RemoteAudioPlayback";
 
 export interface MatrixAudioRendererProps {
   /**
@@ -124,87 +119,24 @@ export function LivekitRoomAudioRenderer({
     if (tracks.length > 0) controls.setPlaybackStarted();
   }, [tracks.length]);
 
+  // Do not mount either playback path until the handset context is ready.
+  const output = useMemo<RemoteAudioOutput | null>(() => {
+    if (!useEarpiece) return { type: "html" };
+    if (!audioContext) return null;
+    return { type: "earpiece", context: audioContext, pan, volume };
+  }, [useEarpiece, audioContext, pan, volume]);
+
   return (
     <div style={{ display: "none" }}>
-      {tracks.map((trackRef) =>
-        useEarpiece ? (
-          <EarpieceAudioTrack
+      {output &&
+        tracks.map((trackRef) => (
+          <RemoteAudioPlayback
             key={getTrackReferenceId(trackRef)}
             trackRef={trackRef}
-            audioContext={audioContext}
-            pan={pan}
-            volume={volume}
+            output={output}
             muted={muted}
           />
-        ) : (
-          // Keep HTML playback for speaker/headsets: WebAudio can be suspended
-          // in standby on iOS (WebKit #251532).
-          <AudioTrack
-            key={getTrackReferenceId(trackRef)}
-            trackRef={trackRef}
-            muted={muted}
-          />
-        ),
-      )}
+        ))}
     </div>
   );
-}
-
-/**
- * Own handset playback exclusively. Attaching an HTML audio element as well
- * lets LiveKit.startAudio or React unmute a full-volume path on iOS, where
- * HTMLMediaElement.volume cannot attenuate playback.
- */
-function EarpieceAudioTrack({
-  trackRef,
-  audioContext,
-  pan,
-  volume,
-  muted,
-}: {
-  trackRef: TrackReference;
-  audioContext?: AudioContext;
-  pan: number;
-  volume: number;
-  muted?: boolean;
-}): ReactNode {
-  const publication = trackRef.publication;
-  const track = publication.track;
-  const { participant, source: trackSource } = trackRef;
-
-  useEffect(() => {
-    if (publication instanceof RemoteTrackPublication && muted !== undefined) {
-      publication.setEnabled(!muted);
-    }
-  }, [publication, muted]);
-
-  useEffect(() => {
-    if (!audioContext || !(track instanceof RemoteAudioTrack) || muted) return;
-    const source = audioContext.createMediaStreamSource(
-      new MediaStream([track.mediaStreamTrack]),
-    );
-    const gain = audioContext.createGain();
-    const panner = audioContext.createStereoPanner();
-    const volumeSubscription = observeRemoteAudioVolume(
-      participant,
-      trackSource,
-    ).subscribe((requestedVolume) => {
-      gain.gain.value = volume * requestedVolume;
-    });
-    panner.pan.value = pan;
-    source.connect(gain).connect(panner).connect(audioContext.destination);
-    void audioContext.resume().catch((error) => {
-      rootLogger
-        .getChild("[MatrixAudioRenderer]")
-        .warn("Unable to start handset audio", error);
-    });
-    return (): void => {
-      volumeSubscription.unsubscribe();
-      source.disconnect();
-      gain.disconnect();
-      panner.disconnect();
-    };
-  }, [audioContext, track, participant, trackSource, pan, volume, muted]);
-
-  return null;
 }

@@ -26,7 +26,7 @@ import { constant } from "../state/Behavior";
 import { setRemoteAudioVolume } from "./RemoteAudioVolume";
 import { availableOutputDevices$ } from "../controls";
 
-// Keep the real LiveKit HTML renderer, Room and remote tracks. Only signalling
+// Keep real LiveKit HTML attachment, Room and remote tracks. Only signalling
 // and browser hardware are replaced, so startAudio can expose the original bypass.
 vi.mock("../Platform", () => ({ platform: "ios" }));
 vi.mock("@livekit/components-core", async (original) => ({
@@ -71,16 +71,19 @@ class Context {
     Context.instances.push(this);
   }
   createGain = (): AudioNodeMock => {
+    if (this.state === "closed") throw new Error("AudioContext is closed");
     const node = new AudioNodeMock();
     this.gains.push(node);
     return node;
   };
   createStereoPanner = (): AudioNodeMock => {
+    if (this.state === "closed") throw new Error("AudioContext is closed");
     const node = new AudioNodeMock();
     this.panners.push(node);
     return node;
   };
   createMediaStreamSource = vi.fn((_stream: Stream) => {
+    if (this.state === "closed") throw new Error("AudioContext is closed");
     const node = new AudioNodeMock();
     this.sources.push(node);
     return node;
@@ -122,7 +125,7 @@ function remoteTrack(id: string): RemoteAudioTrack {
   );
 }
 
-function setup(strict = false) {
+function setup({ strict = false, initialVolume = 1, speaker = false } = {}) {
   const room = new Room({ webAudioMix: false });
   const participant = new RemoteParticipant(
     {} as ConstructorParameters<typeof RemoteParticipant>[0],
@@ -151,6 +154,8 @@ function setup(strict = false) {
   availableOutputDevices$.next([
     { id: "speaker", name: "Speaker", isSpeaker: true, forEarpiece: true },
   ]);
+  if (speaker) audioOutput.select("speaker");
+  setRemoteAudioVolume(participant, initialVolume);
   const devices = mockMediaDevices({ audioOutput });
   const view = (muted = false) => (
     <MediaDevicesContext value={devices}>
@@ -337,7 +342,7 @@ it("keeps simultaneous remote tracks isolated and disconnects a removed track", 
   call.end();
 });
 
-it("preserves participant volume, mute and volume changes across route switches", () => {
+it("preserves participant volume, mute and volume changes across route switches", async () => {
   const call = setup();
   const context = Context.instances[0];
   act(() => setRemoteAudioVolume(call.participant, 0.4));
@@ -345,7 +350,12 @@ it("preserves participant volume, mute and volume changes across route switches"
   act(() => setRemoteAudioVolume(call.participant, 0));
   expect(context.gains[0].gain.value).toBe(0);
   act(() => call.audioOutput.select("speaker"));
+  expect(call.container.querySelector("audio")).toBeNull();
+  expect(call.publication.isEnabled).toBe(false);
+  await act(async () => call.room.startAudio());
+  expect(call.track.attachedElements).toHaveLength(0);
   act(() => setRemoteAudioVolume(call.participant, 0.6));
+  expect(call.publication.isEnabled).toBe(true);
   expect(call.container.querySelector("audio")?.volume).toBe(0.6);
   act(() => call.audioOutput.select("earpiece-id"));
   expect(Context.instances.at(-1)!.gains[0].gain.value).toBeCloseTo(0.06);
@@ -353,7 +363,7 @@ it("preserves participant volume, mute and volume changes across route switches"
 });
 
 it("releases discarded contexts and nodes under React StrictMode", () => {
-  const call = setup(true);
+  const call = setup({ strict: true });
   expect(Context.instances[0].close).toHaveBeenCalledOnce();
   expectHandset(Context.instances.at(-1)!);
   call.end();
@@ -380,4 +390,76 @@ it("disconnects handset playback on an unsubscribe event without a parent rerend
   expect(context.gains[0].disconnect).toHaveBeenCalledOnce();
   expect(context.panners[0].disconnect).toHaveBeenCalledOnce();
   call.end();
+});
+
+it("applies requested volume before the first speaker attachment", () => {
+  const call = setup({ initialVolume: 0.4, speaker: true });
+  expect(Context.instances).toHaveLength(0);
+  expect(call.container.querySelector("audio")?.volume).toBe(0.4);
+  call.end();
+});
+
+it("keeps initially muted speaker playback detached until unmuted", async () => {
+  const call = setup({ initialVolume: 0, speaker: true });
+  expect(call.track.attachedElements).toHaveLength(0);
+  expect(call.publication.isEnabled).toBe(false);
+  await act(async () => call.room.startAudio());
+  expect(call.track.attachedElements).toHaveLength(0);
+  act(() => setRemoteAudioVolume(call.participant, 0.5));
+  expect(call.publication.isEnabled).toBe(true);
+  expect(call.container.querySelector("audio")?.volume).toBe(0.5);
+  call.end();
+});
+
+it("applies requested volume to replacement speaker tracks", () => {
+  const call = setup({ initialVolume: 0.4, speaker: true });
+  const replacement = remoteTrack("TR_replacement");
+  act(() => {
+    call.publication.setTrack(replacement);
+    call.room.emit(
+      RoomEvent.TrackSubscribed,
+      replacement,
+      call.publication,
+      call.participant,
+    );
+  });
+  expect(call.track.attachedElements).toHaveLength(0);
+  expect(replacement.attachedElements).toHaveLength(1);
+  expect(call.container.querySelector("audio")?.volume).toBe(0.4);
+  call.end();
+});
+
+it("keeps global and participant mute independent through route changes", async () => {
+  const call = setup();
+  const context = Context.instances[0];
+  call.rerender(call.view(true));
+  act(() => {
+    setRemoteAudioVolume(call.participant, 0);
+    call.audioOutput.select("speaker");
+    setRemoteAudioVolume(call.participant, 0.5);
+  });
+  expect(call.publication.isEnabled).toBe(false);
+  expect(call.track.attachedElements).toHaveLength(0);
+  expect(context.sources[0].disconnect).toHaveBeenCalledOnce();
+  await act(async () => call.room.startAudio());
+  expect(call.track.attachedElements).toHaveLength(0);
+  expect(call.publication.isEnabled).toBe(false);
+  call.rerender(call.view(false));
+  expect(call.publication.isEnabled).toBe(true);
+  expect(call.container.querySelector("audio")?.volume).toBe(0.5);
+  act(() => setRemoteAudioVolume(call.participant, 0));
+  call.rerender(call.view(true));
+  call.rerender(call.view(false));
+  expect(call.publication.isEnabled).toBe(false);
+  expect(call.track.attachedElements).toHaveLength(0);
+  call.end();
+});
+
+it("releases volume subscriptions when handset playback ends", () => {
+  const call = setup();
+  const context = Context.instances[0];
+  call.end();
+  act(() => setRemoteAudioVolume(call.participant, 0.5));
+  expect(context.gains[0].gain.value).toBe(0.1);
+  expect(context.sources[0].disconnect).toHaveBeenCalledOnce();
 });

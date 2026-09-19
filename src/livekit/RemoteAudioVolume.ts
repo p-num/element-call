@@ -5,15 +5,12 @@ SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Element-Commercial
 Please see LICENSE in the repository root for full details.
 */
 
-import {
-  type Participant,
-  type RemoteParticipant,
-  Track,
-} from "livekit-client";
+import { type Participant, Track } from "livekit-client";
 import { BehaviorSubject, type Observable } from "rxjs";
 
-// LiveKit has no volume-change event. Keep the app's requested volume available
-// to both HTML playback (LiveKit) and the exclusive handset WebAudio renderer.
+// The app owns requested volume; each renderer applies it to its playback path.
+// Keeping this state independent of LiveKit also preserves zero volume when an
+// HTML audio element is reattached, which LiveKit does not restore itself.
 // Weak keys keep this state bounded to the lifetime of the participant.
 const volumes = new WeakMap<
   Participant,
@@ -38,14 +35,13 @@ function volumeFor(
 }
 
 export function setRemoteAudioVolume(
-  participant: RemoteParticipant | null,
+  participant: Participant | null,
   volume: number,
-  source?: Track.Source.Microphone | Track.Source.ScreenShareAudio,
+  source: Track.Source.Microphone | Track.Source.ScreenShareAudio = Track.Source
+    .Microphone,
 ): void {
   if (!participant) return;
-  volumeFor(participant, source ?? Track.Source.Microphone).next(volume);
-  if (source === undefined) participant.setVolume(volume);
-  else participant.setVolume(volume, source);
+  volumeFor(participant, source).next(volume);
 }
 
 export function observeRemoteAudioVolume(

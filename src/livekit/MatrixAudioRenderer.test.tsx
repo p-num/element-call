@@ -47,16 +47,15 @@ afterEach(() => {
 vi.mock("@livekit/components-react", async (importOriginal) => {
   return {
     ...(await importOriginal()),
-    AudioTrack: (props: { trackRef: TrackReference }): ReactNode => {
-      return (
-        <audio data-testid={"audio"}>
-          {getTrackReferenceId(props.trackRef)}
-        </audio>
-      );
-    },
     useTracks: vi.fn(),
   };
 });
+
+vi.mock("./RemoteAudioPlayback", () => ({
+  RemoteAudioPlayback: (props: { trackRef: TrackReference }): ReactNode => (
+    <audio data-testid="audio">{getTrackReferenceId(props.trackRef)}</audio>
+  ),
+}));
 
 let tracks: TrackReference[] = [];
 
