@@ -7,7 +7,6 @@ Please see LICENSE in the repository root for full details.
 
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { act, cleanup, render } from "@testing-library/react";
-import { type TrackReference } from "@livekit/components-core";
 import { of } from "rxjs";
 import { StrictMode } from "react";
 import {
@@ -29,15 +28,10 @@ import { availableOutputDevices$ } from "../controls";
 
 // Keep the real LiveKit HTML renderer, Room and remote tracks. Only signalling
 // and browser hardware are replaced, so startAudio can expose the original bypass.
-const fixture = vi.hoisted(() => ({ tracks: [] as TrackReference[] }));
 vi.mock("../Platform", () => ({ platform: "ios" }));
 vi.mock("@livekit/components-core", async (original) => ({
   ...(await original()),
   createMediaDeviceObserver: () => of([]),
-}));
-vi.mock("@livekit/components-react", async (original) => ({
-  ...(await original()),
-  useTracks: () => fixture.tracks,
 }));
 
 class Stream extends EventTarget {
@@ -103,7 +97,6 @@ class Context {
 
 beforeEach(() => {
   Context.instances = [];
-  fixture.tracks = [];
   vi.stubGlobal("MediaStream", Stream);
   vi.stubGlobal("AudioContext", Context);
   vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue();
@@ -149,9 +142,6 @@ function setup(strict = false) {
   participant.audioTrackPublications.set("TR_1", publication);
   participant.trackPublications.set("TR_1", publication);
   room.remoteParticipants.set("remote", participant);
-  fixture.tracks = [
-    { participant, source: Track.Source.Microphone, publication },
-  ];
   const scope = new ObservableScope();
   const audioOutput = new IOSControlledAudioOutput(
     constant(false),
@@ -257,12 +247,19 @@ it("switches between exclusive handset and normal HTML speaker playback", async 
   call.end();
 });
 
-it("replaces the source when a publication receives a new remote track", () => {
+it("replaces the source on subscription events without a parent rerender", () => {
   const call = setup();
   const context = Context.instances[0];
   const replacement = remoteTrack("TR_replacement");
-  call.publication.setTrack(replacement);
-  call.rerender(call.view());
+  act(() => {
+    call.publication.setTrack(replacement);
+    call.room.emit(
+      RoomEvent.TrackSubscribed,
+      replacement,
+      call.publication,
+      call.participant,
+    );
+  });
   expect(context.sources[0].disconnect).toHaveBeenCalledOnce();
   const stream = context.createMediaStreamSource.mock.calls.at(
     -1,
@@ -297,15 +294,17 @@ it("keeps simultaneous remote tracks isolated and disconnects a removed track", 
     true,
   );
   publication.setTrack(remoteTrack("TR_2"));
-  fixture.tracks = [
-    ...fixture.tracks,
-    {
-      ...fixture.tracks[0],
+  publication.source = Track.Source.ScreenShareAudio;
+  act(() => {
+    call.participant.audioTrackPublications.set("TR_2", publication);
+    call.participant.trackPublications.set("TR_2", publication);
+    call.room.emit(
+      RoomEvent.TrackSubscribed,
+      publication.track!,
       publication,
-      source: Track.Source.ScreenShareAudio,
-    },
-  ];
-  call.rerender(call.view());
+      call.participant,
+    );
+  });
   expect(context.sources).toHaveLength(2);
   expect(context.sources[0].connect).toHaveBeenCalledExactlyOnceWith(
     context.gains[0],
@@ -324,8 +323,15 @@ it("keeps simultaneous remote tracks isolated and disconnects a removed track", 
   );
   expect(context.gains[0].gain.value).toBe(0.1);
   expect(context.gains[1].gain.value).toBeCloseTo(0.03);
-  fixture.tracks = fixture.tracks.slice(1);
-  call.rerender(call.view());
+  act(() => {
+    call.participant.audioTrackPublications.delete("TR_1");
+    call.participant.trackPublications.delete("TR_1");
+    call.room.emit(
+      RoomEvent.TrackUnpublished,
+      call.publication,
+      call.participant,
+    );
+  });
   expect(context.sources[0].disconnect).toHaveBeenCalledOnce();
   expect(context.sources[1].disconnect).not.toHaveBeenCalled();
   call.end();
@@ -356,4 +362,22 @@ it("releases discarded contexts and nodes under React StrictMode", () => {
     for (const source of context.sources)
       expect(source.disconnect).toHaveBeenCalledOnce();
   }
+});
+
+it("disconnects handset playback on an unsubscribe event without a parent rerender", () => {
+  const call = setup();
+  const context = Context.instances[0];
+  act(() => {
+    call.publication.setTrack(undefined);
+    call.room.emit(
+      RoomEvent.TrackUnsubscribed,
+      call.track,
+      call.publication,
+      call.participant,
+    );
+  });
+  expect(context.sources[0].disconnect).toHaveBeenCalledOnce();
+  expect(context.gains[0].disconnect).toHaveBeenCalledOnce();
+  expect(context.panners[0].disconnect).toHaveBeenCalledOnce();
+  call.end();
 });

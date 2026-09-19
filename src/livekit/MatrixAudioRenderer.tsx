@@ -9,7 +9,7 @@ import {
   getTrackReferenceId,
   type TrackReference,
 } from "@livekit/components-core";
-import { type Room as LivekitRoom } from "livekit-client";
+import { RoomEvent, type Room as LivekitRoom } from "livekit-client";
 import {
   RemoteAudioTrack,
   RemoteTrackPublication,
@@ -70,7 +70,8 @@ export function LivekitRoomAudioRenderer({
       Track.Source.Unknown,
     ],
     {
-      updateOnlyOn: [],
+      // A publication can replace its track without changing subscription status.
+      updateOnlyOn: [RoomEvent.TrackSubscribed, RoomEvent.TrackUnsubscribed],
       onlySubscribed: true,
       room: livekitRoom,
     },
