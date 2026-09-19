@@ -9,6 +9,7 @@ Please see LICENSE in the repository root for full details.
 import { Track, type RemoteParticipant } from "livekit-client";
 import { map, of, switchMap } from "rxjs";
 
+import { setRemoteAudioVolume } from "../../livekit/RemoteAudioVolume";
 import { type Behavior } from "../Behavior";
 import {
   type BaseScreenShareInputs,
@@ -49,7 +50,7 @@ export function createRemoteScreenShare(
         inputs.participant$.pipe(
           map(
             (p) => (volume) =>
-              p?.setVolume(volume, Track.Source.ScreenShareAudio),
+              setRemoteAudioVolume(p, volume, Track.Source.ScreenShareAudio),
           ),
         ),
       ),

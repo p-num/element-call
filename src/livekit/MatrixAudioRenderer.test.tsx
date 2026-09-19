@@ -11,12 +11,7 @@ import {
   getTrackReferenceId,
   type TrackReference,
 } from "@livekit/components-core";
-import {
-  type Participant,
-  type RemoteAudioTrack,
-  type Room,
-  Track,
-} from "livekit-client";
+import { type Participant, type Room, Track } from "livekit-client";
 import { type ReactNode } from "react";
 import { useTracks } from "@livekit/components-react";
 
@@ -52,16 +47,15 @@ afterEach(() => {
 vi.mock("@livekit/components-react", async (importOriginal) => {
   return {
     ...(await importOriginal()),
-    AudioTrack: (props: { trackRef: TrackReference }): ReactNode => {
-      return (
-        <audio data-testid={"audio"}>
-          {getTrackReferenceId(props.trackRef)}
-        </audio>
-      );
-    },
     useTracks: vi.fn(),
   };
 });
+
+vi.mock("./RemoteAudioPlayback", () => ({
+  RemoteAudioPlayback: (props: { trackRef: TrackReference }): ReactNode => (
+    <audio data-testid="audio">{getTrackReferenceId(props.trackRef)}</audio>
+  ),
+}));
 
 let tracks: TrackReference[] = [];
 
@@ -258,31 +252,7 @@ it.each(TEST_CASES)(
   },
 );
 
-it("should not setup audioContext gain and pan if there is no need to.", () => {
+it("does not allocate WebAudio for normal speaker playback", () => {
   renderTestComponent([{ userId: "@bob", deviceId: "DEV0" }], ["@bob:DEV0"]);
-  const audioTrack = tracks[0].publication.track! as RemoteAudioTrack;
-
-  expect(audioTrack.setAudioContext).toHaveBeenCalledTimes(1);
-  expect(audioTrack.setAudioContext).toHaveBeenCalledWith(undefined);
-  expect(audioTrack.setWebAudioPlugins).toHaveBeenCalledTimes(1);
-  expect(audioTrack.setWebAudioPlugins).toHaveBeenCalledWith([]);
-
-  expect(testAudioContext.gain.gain.value).toEqual(1);
-  expect(testAudioContext.pan.pan.value).toEqual(0);
-});
-
-it("should setup audioContext gain and pan", () => {
-  vi.spyOn(MediaDevicesContext, "useEarpieceAudioConfig").mockReturnValue({
-    pan: 1,
-    volume: 0.1,
-  });
-
-  renderTestComponent([{ userId: "@bob", deviceId: "DEV0" }], ["@bob:DEV0"]);
-
-  const audioTrack = tracks[0].publication.track! as RemoteAudioTrack;
-  expect(audioTrack.setAudioContext).toHaveBeenCalled();
-  expect(audioTrack.setWebAudioPlugins).toHaveBeenCalled();
-
-  expect(testAudioContext.gain.gain.value).toEqual(0.1);
-  expect(testAudioContext.pan.pan.value).toEqual(1);
+  expect(TestAudioContextConstructor).not.toHaveBeenCalled();
 });
