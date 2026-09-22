@@ -226,7 +226,9 @@ export function useAudioContext<S extends string>(
     })().catch((error) => {
       if (!disposed) {
         logger.error("Unable to route call sound effects", error);
-        setRoutingError(new Error("Unable to select call audio output"));
+        setRoutingError(
+          new Error("Unable to select call audio output", { cause: error }),
+        );
       }
       dispose();
     });

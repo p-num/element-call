@@ -74,9 +74,15 @@ export function RemoteAudioPlayback({
           .then((current) => {
             if (current) attach();
           })
-          .catch(() => {
-            if (active)
-              setRoutingError(new Error("Unable to select call audio output"));
+          .catch((error) => {
+            if (active) {
+              logger.error("Unable to route remote call audio", error);
+              setRoutingError(
+                new Error("Unable to select call audio output", {
+                  cause: error,
+                }),
+              );
+            }
           });
       }
       return (): void => {

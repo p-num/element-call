@@ -48,7 +48,8 @@ export interface MatrixAudioRendererProps {
  * Takes care of handling remote participants’ audio tracks and makes sure that microphones and screen share are audible.
  *
  * It also takes care of the earpiece audio configuration for iOS devices.
- * This is done by using the WebAudio API to create a stereo pan effect that mimics the earpiece audio.
+ * Routes to browser output devices when WebKit supports selection, retaining
+ * the legacy WebAudio earpiece approximation on older iOS versions.
  * @example
  * ```tsx
  * <LiveKitRoom>

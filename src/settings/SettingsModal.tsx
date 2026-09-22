@@ -12,6 +12,7 @@ import { Button, Root as Form, Separator } from "@vector-im/compound-web";
 import { type Room as LivekitRoom } from "livekit-client";
 
 import { Modal } from "../Modal";
+import { supportsWebKitAudioOutput } from "../routeAudioOutput";
 import styles from "./SettingsModal.module.css";
 import { type Tab, TabContainer } from "../tabs/Tabs";
 import { ProfileSettingsTab } from "./ProfileSettingsTab";
@@ -141,18 +142,20 @@ export const SettingsModal: FC<Props> = ({
               }
             />
           )}
-          {iosDeviceMenu && controlledAudioDevices && (
-            <Button
-              onClick={(e): void => {
-                e.preventDefault();
-                window.controls.showNativeAudioDevicePicker?.();
-                // call deprecated method for backwards compatibility.
-                window.controls.showNativeOutputDevicePicker?.();
-              }}
-            >
-              {t("settings.devices.change_device_button")}
-            </Button>
-          )}
+          {iosDeviceMenu &&
+            controlledAudioDevices &&
+            !supportsWebKitAudioOutput() && (
+              <Button
+                onClick={(e): void => {
+                  e.preventDefault();
+                  window.controls.showNativeAudioDevicePicker?.();
+                  // call deprecated method for backwards compatibility.
+                  window.controls.showNativeOutputDevicePicker?.();
+                }}
+              >
+                {t("settings.devices.change_device_button")}
+              </Button>
+            )}
           <DeviceSelection
             device={devices.audioOutput}
             title={t("settings.devices.speaker")}
