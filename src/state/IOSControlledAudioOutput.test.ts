@@ -6,7 +6,7 @@ Please see LICENSE in the repository root for full details.
 */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { type Observable, of } from "rxjs";
+import { type Observable, BehaviorSubject, of } from "rxjs";
 
 import { ObservableScope } from "./ObservableScope";
 import { constant } from "./Behavior";
@@ -27,8 +27,12 @@ import {
 // is available, and stub the livekit device observer (only subscribed for its
 // side effects).
 vi.mock("../Platform", () => ({ platform: "ios" }));
+const browser = vi.hoisted(() => ({
+  devices: null as unknown as BehaviorSubject<MediaDeviceInfo[]>,
+}));
 vi.mock("@livekit/components-core", () => ({
-  createMediaDeviceObserver: (): Observable<MediaDeviceInfo[]> => of([]),
+  createMediaDeviceObserver: (): Observable<MediaDeviceInfo[]> =>
+    browser.devices ?? of([]),
 }));
 
 // On iOS the host reports a single device for the current route. When output is
@@ -158,5 +162,86 @@ describe("Explicit selection", () => {
     outputDevice$.next(SPEAKER.id);
 
     expect(selected()).toEqual({ id: SPEAKER.id, virtualEarpiece: false });
+  });
+});
+
+describe("WebKit output selection", () => {
+  const receiver = {
+    deviceId: "web-receiver",
+    label: "Receiver",
+    kind: "audiooutput",
+  } as MediaDeviceInfo;
+  const speaker = {
+    deviceId: "web-speaker",
+    label: "Speaker",
+    kind: "audiooutput",
+  } as MediaDeviceInfo;
+  const defaultSpeaker = {
+    deviceId: "default",
+    label: "Default - Speaker",
+    kind: "audiooutput",
+  } as MediaDeviceInfo;
+  beforeEach(() => {
+    browser.devices = new BehaviorSubject<MediaDeviceInfo[]>([]);
+    Object.defineProperty(HTMLMediaElement.prototype, "setSinkId", {
+      configurable: true,
+      value: vi.fn(),
+    });
+  });
+  afterEach(() => {
+    delete (HTMLMediaElement.prototype as Partial<HTMLMediaElement>).setSinkId;
+    browser.devices = null!;
+  });
+  it("waits for enumeration, then selects a real receiver without virtual gain", () => {
+    const output = new IOSControlledAudioOutput(
+      constant(false),
+      testScope,
+      "audio",
+    );
+    availableOutputDevices$.next([SPEAKER]);
+    expect(output.selected$.value).toBeUndefined();
+    browser.devices.next([defaultSpeaker, speaker, receiver]);
+    expect(output.selected$.value).toEqual({
+      id: receiver.deviceId,
+      sinkId: receiver.deviceId,
+      virtualEarpiece: false,
+    });
+    expect(output.available$.value.has(EARPIECE_CONFIG_ID)).toBe(false);
+    expect(window.controls.onOutputDeviceSelect).toHaveBeenLastCalledWith(
+      EARPIECE_CONFIG_ID,
+    );
+    output.select(speaker.deviceId);
+    outputDevice$.next("native-uid");
+    availableOutputDevices$.next([SPEAKER]);
+    expect(output.selected$.value?.sinkId).toBe(speaker.deviceId);
+  });
+  it("keeps the system headset default and replaces disconnected choices", () => {
+    browser.devices.next([
+      { ...defaultSpeaker, label: "Default - Headphones" },
+      speaker,
+      receiver,
+    ]);
+    const output = new IOSControlledAudioOutput(
+      constant(false),
+      testScope,
+      "audio",
+    );
+    expect(output.selected$.value?.sinkId).toBe("default");
+    output.select(receiver.deviceId);
+    browser.devices.next([speaker]);
+    expect(output.selected$.value?.sinkId).toBe(speaker.deviceId);
+  });
+  it("keeps unknown labels selectable without guessing which is the receiver", () => {
+    browser.devices.next([{ ...receiver, label: "Unknown output" }]);
+    const output = new IOSControlledAudioOutput(
+      constant(false),
+      testScope,
+      "video",
+    );
+    expect(output.available$.value.get(receiver.deviceId)).toEqual({
+      type: "name",
+      name: "Unknown output",
+    });
+    expect(output.selected$.value?.sinkId).toBe(receiver.deviceId);
   });
 });

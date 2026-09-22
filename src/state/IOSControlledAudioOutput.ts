@@ -6,7 +6,7 @@ Please see LICENSE in the repository root for full details.
 */
 
 import { logger as rootLogger } from "matrix-js-sdk/lib/logger";
-import { combineLatest, merge, startWith, Subject, tap } from "rxjs";
+import { combineLatest, filter, merge, startWith, Subject, tap } from "rxjs";
 
 import type { RTCCallIntent } from "matrix-js-sdk/lib/matrixrtc";
 import {
@@ -22,6 +22,8 @@ import {
   type MediaDevice,
   type SelectedAudioOutputDevice,
 } from "./MediaDevices.ts";
+
+import { supportsWebKitAudioOutput } from "../routeAudioOutput";
 
 // This hardcoded id is used in EX ios! It can only be changed in coordination with
 // the ios swift team.
@@ -49,8 +51,30 @@ export class IOSControlledAudioOutput implements MediaDevice<
 
   public readonly available$ = this.scope.behavior(
     combineLatest(
-      [controlledAvailableOutputDevices$.pipe(startWith([])), iosDeviceMenu$],
-      (availableRaw, iosDeviceMenu) => {
+      [
+        controlledAvailableOutputDevices$.pipe(startWith([])),
+        iosDeviceMenu$,
+        this.availableRaw$,
+      ],
+      (availableRaw, iosDeviceMenu, browserDevices) => {
+        if (supportsWebKitAudioOutput()) {
+          return new Map(
+            browserDevices.map(({ deviceId, label }) => {
+              // WebKit's built-in port labels. Unknown/localized names remain
+              // selectable verbatim; never guess a receiver from device ordering.
+              const type =
+                label === "Receiver"
+                  ? "earpiece"
+                  : label === "Speaker"
+                    ? "speaker"
+                    : "name";
+              return [
+                deviceId,
+                { type, name: label } as AudioOutputDeviceLabel,
+              ];
+            }),
+          );
+        }
         const available = new Map<string, AudioOutputDeviceLabel>(
           availableRaw.map(
             ({ id, name, isEarpiece, isSpeaker /*,isExternalHeadset*/ }) => {
@@ -90,15 +114,25 @@ export class IOSControlledAudioOutput implements MediaDevice<
       [
         this.available$,
         merge(
-          controlledOutputSelection$.pipe(startWith(undefined)),
+          controlledOutputSelection$.pipe(
+            filter(() => !supportsWebKitAudioOutput()),
+            startWith(undefined),
+          ),
           this.deviceSelection$,
         ),
       ],
       (available, preferredId) => {
-        const id = preferredId ?? this.chooseDefaultId(available);
+        const id =
+          preferredId !== undefined && available.has(preferredId)
+            ? preferredId
+            : this.chooseDefaultId(available);
         return id === undefined
           ? undefined
-          : { id, virtualEarpiece: id === EARPIECE_CONFIG_ID };
+          : {
+              id,
+              virtualEarpiece: id === EARPIECE_CONFIG_ID,
+              ...(supportsWebKitAudioOutput() ? { sinkId: id } : {}),
+            };
       },
     ).pipe(
       tap((selected) => {
@@ -125,7 +159,10 @@ export class IOSControlledAudioOutput implements MediaDevice<
     if (this.initialIntent === "audio") {
       const firstLabel =
         firstId !== undefined ? available.get(firstId) : undefined;
-      if (firstLabel?.type === "speaker") {
+      const defaultIsBuiltIn =
+        firstLabel?.type === "name" &&
+        /^(Default - )?(Receiver|Speaker)$/.test(firstLabel.name);
+      if (firstLabel?.type === "speaker" || defaultIsBuiltIn) {
         for (const [id, label] of available)
           if (label.type === "earpiece") {
             this.logger.info(
@@ -150,9 +187,13 @@ export class IOSControlledAudioOutput implements MediaDevice<
       // whether it should enable the proximity sensor.
       if (device !== undefined) {
         this.logger.info("onAudioDeviceSelect called:", device);
-        window.controls.onAudioDeviceSelect?.(device.id);
+        const nativeID =
+          this.available$.value.get(device.id)?.type === "earpiece"
+            ? EARPIECE_CONFIG_ID
+            : device.id;
+        window.controls.onAudioDeviceSelect?.(nativeID);
         // Also invoke the deprecated callback for backward compatibility
-        window.controls.onOutputDeviceSelect?.(device.id);
+        window.controls.onOutputDeviceSelect?.(nativeID);
       }
     });
     this.available$.subscribe((available) => {

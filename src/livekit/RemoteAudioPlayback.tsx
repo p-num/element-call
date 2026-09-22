@@ -9,12 +9,13 @@ import { type TrackReference } from "@livekit/components-core";
 import { RemoteAudioTrack, RemoteTrackPublication } from "livekit-client";
 import { logger } from "matrix-js-sdk/lib/logger";
 import { useObservableEagerState } from "observable-hooks";
-import { useEffect, useMemo, useRef, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
+import { routeAudioOutput } from "../routeAudioOutput";
 import { observeRemoteAudioVolume } from "./RemoteAudioVolume";
 
 export type RemoteAudioOutput =
-  | { type: "html" }
+  | { type: "html"; sinkId?: string }
   | { type: "earpiece"; context: AudioContext; pan: number; volume: number };
 
 /**
@@ -34,6 +35,7 @@ export function RemoteAudioPlayback({
   const { participant, source: trackSource, publication } = trackRef;
   const track = publication.track;
   const audioElement = useRef<HTMLAudioElement>(null);
+  const [routingError, setRoutingError] = useState<Error>();
   const volume$ = useMemo(
     () => observeRemoteAudioVolume(participant, trackSource),
     [participant, trackSource],
@@ -58,10 +60,29 @@ export function RemoteAudioPlayback({
       const subscription = volume$.subscribe((volume) =>
         track.setVolume(volume),
       );
-      track.attach(element);
+      let active = true;
+      let attached = false;
+      const attach = (): void => {
+        if (!active) return;
+        track.attach(element);
+        attached = true;
+      };
+      if (output.sinkId === undefined) attach();
+      else {
+        // Do not attach/start this track on the default speaker while routing.
+        void routeAudioOutput(element, output.sinkId, () => active)
+          .then((current) => {
+            if (current) attach();
+          })
+          .catch(() => {
+            if (active)
+              setRoutingError(new Error("Unable to select call audio output"));
+          });
+      }
       return (): void => {
+        active = false;
         subscription.unsubscribe();
-        track.detach(element);
+        if (attached) track.detach(element);
       };
     }
     const { context, pan, volume } = output;
@@ -87,6 +108,8 @@ export function RemoteAudioPlayback({
       panner.disconnect();
     };
   }, [output, track, volume$, playbackMuted]);
+
+  if (routingError) throw routingError;
 
   // iOS ignores HTML volume. Detaching muted playback also prevents startAudio
   // from reviving it while the server processes the publication disable request.

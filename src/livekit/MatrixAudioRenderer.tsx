@@ -11,7 +11,13 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useTracks } from "@livekit/components-react";
 import { logger as rootLogger } from "matrix-js-sdk/lib/logger";
 
-import { useEarpieceAudioConfig } from "../MediaDevicesContext";
+import { useObservableEagerState } from "observable-hooks";
+import { getUrlParams } from "../UrlParams";
+import { supportsWebKitAudioOutput } from "../routeAudioOutput";
+import {
+  useMediaDevices,
+  useEarpieceAudioConfig,
+} from "../MediaDevicesContext";
 import * as controls from "../controls";
 import {
   RemoteAudioPlayback,
@@ -89,6 +95,13 @@ export function LivekitRoomAudioRenderer({
       return true;
     });
 
+  const selectedOutput = useObservableEagerState(
+    useMediaDevices().audioOutput.selected$,
+  );
+  const { controlledAudioDevices } = getUrlParams();
+  const awaitingOutput =
+    controlledAudioDevices && supportsWebKitAudioOutput() && !selectedOutput;
+  const sinkId = selectedOutput?.sinkId;
   const { pan, volume } = useEarpieceAudioConfig();
   const useEarpiece = pan !== 0;
   const [audioContext, setAudioContext] = useState<AudioContext>();
@@ -121,17 +134,18 @@ export function LivekitRoomAudioRenderer({
 
   // Do not mount either playback path until the handset context is ready.
   const output = useMemo<RemoteAudioOutput | null>(() => {
-    if (!useEarpiece) return { type: "html" };
+    if (awaitingOutput) return null;
+    if (!useEarpiece) return { type: "html", sinkId };
     if (!audioContext) return null;
     return { type: "earpiece", context: audioContext, pan, volume };
-  }, [useEarpiece, audioContext, pan, volume]);
+  }, [useEarpiece, audioContext, pan, volume, sinkId, awaitingOutput]);
 
   return (
     <div style={{ display: "none" }}>
       {output &&
         tracks.map((trackRef) => (
           <RemoteAudioPlayback
-            key={getTrackReferenceId(trackRef)}
+            key={`${getTrackReferenceId(trackRef)}:${sinkId ?? "native"}`}
             trackRef={trackRef}
             output={output}
             muted={muted}
