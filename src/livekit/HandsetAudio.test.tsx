@@ -492,9 +492,14 @@ describe("WebKit output routing", () => {
       configurable: true,
       value: setSinkId,
     });
+    window.__letroAudioOutput = {
+      setSinkId: async (element, id, isCurrent) =>
+        isCurrent() ? element.setSinkId(id) : Promise.resolve(),
+    };
     return setSinkId;
   };
   afterEach(() => {
+    delete window.__letroAudioOutput;
     delete (HTMLMediaElement.prototype as Partial<HTMLMediaElement>).setSinkId;
   });
 

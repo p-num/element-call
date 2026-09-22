@@ -120,11 +120,16 @@ const TestAudioContext = vi.fn(
 
 let user: UserEvent;
 beforeEach(() => {
+  window.__letroAudioOutput = {
+    setSinkId: async (element, id, isCurrent) =>
+      isCurrent() ? element.setSinkId(id) : Promise.resolve(),
+  };
   vi.stubGlobal("AudioContext", TestAudioContext);
   user = userEvent.setup();
 });
 
 afterEach(() => {
+  delete window.__letroAudioOutput;
   vi.unstubAllGlobals();
   vi.clearAllMocks();
 });

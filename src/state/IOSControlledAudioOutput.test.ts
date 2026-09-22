@@ -182,6 +182,9 @@ describe("WebKit output selection", () => {
     kind: "audiooutput",
   } as MediaDeviceInfo;
   beforeEach(() => {
+    window.__letroAudioOutput = {
+      setSinkId: vi.fn().mockResolvedValue(undefined),
+    };
     browser.devices = new BehaviorSubject<MediaDeviceInfo[]>([]);
     Object.defineProperty(HTMLMediaElement.prototype, "setSinkId", {
       configurable: true,
@@ -189,8 +192,22 @@ describe("WebKit output selection", () => {
     });
   });
   afterEach(() => {
+    delete window.__letroAudioOutput;
     delete (HTMLMediaElement.prototype as Partial<HTMLMediaElement>).setSinkId;
     browser.devices = null!;
+  });
+  it("retains legacy selection when an older host exposes the browser API without a routing bridge", () => {
+    delete window.__letroAudioOutput;
+    const output = new IOSControlledAudioOutput(
+      constant(false),
+      testScope,
+      "audio",
+    );
+    availableOutputDevices$.next([SPEAKER]);
+    expect(output.selected$.value).toEqual({
+      id: EARPIECE_CONFIG_ID,
+      virtualEarpiece: true,
+    });
   });
   it("waits for enumeration, then selects a real receiver without virtual gain", () => {
     const output = new IOSControlledAudioOutput(
