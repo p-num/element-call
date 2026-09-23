@@ -66,6 +66,8 @@ export interface SelectedAudioInputDevice extends SelectedDevice {
  * Selected audio output value with output-routing-specific metadata.
  */
 export interface SelectedAudioOutputDevice extends SelectedDevice {
+  /** Browser output ID, when WebKit owns routing instead of the native host. */
+  sinkId?: string;
   /**
    * Whether this device is a "virtual earpiece" device. If so, we should output
    * on a single channel of the device at a reduced volume.

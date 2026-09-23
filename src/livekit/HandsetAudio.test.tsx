@@ -5,7 +5,7 @@ SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Element-Commercial
 Please see LICENSE in the repository root for full details.
 */
 
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, render } from "@testing-library/react";
 import { of } from "rxjs";
 import { StrictMode } from "react";
@@ -16,6 +16,7 @@ import {
   Room,
   RoomEvent,
   Track,
+  supportsAudioOutputSelection,
 } from "livekit-client";
 import { MediaDevicesContext } from "../MediaDevicesContext";
 import { LivekitRoomAudioRenderer } from "./MatrixAudioRenderer";
@@ -29,9 +30,10 @@ import { availableOutputDevices$ } from "../controls";
 // Keep real LiveKit HTML attachment, Room and remote tracks. Only signalling
 // and browser hardware are replaced, so startAudio can expose the original bypass.
 vi.mock("../Platform", () => ({ platform: "ios" }));
+const browserOutputs = vi.hoisted(() => ({ value: [] as MediaDeviceInfo[] }));
 vi.mock("@livekit/components-core", async (original) => ({
   ...(await original()),
-  createMediaDeviceObserver: () => of([]),
+  createMediaDeviceObserver: () => of(browserOutputs.value),
 }));
 
 class Stream extends EventTarget {
@@ -57,7 +59,7 @@ class Stream extends EventTarget {
 class AudioNodeMock {
   connect = vi.fn((next: AudioNodeMock) => next);
   disconnect = vi.fn();
-  gain = { value: 1 };
+  gain = { value: 1, setValueAtTime: vi.fn() };
   pan = { value: 0 };
 }
 class Context {
@@ -70,6 +72,16 @@ class Context {
   constructor() {
     Context.instances.push(this);
   }
+  createOscillator = () => ({ connect: vi.fn(), start: vi.fn() });
+  createMediaStreamDestination = () => {
+    const silent = {
+      kind: "audio",
+      enabled: true,
+      stop: vi.fn(),
+      clone: () => ({ kind: "audio", enabled: true, stop: vi.fn() }),
+    };
+    return { stream: new Stream([silent as unknown as MediaStreamTrack]) };
+  };
   createGain = (): AudioNodeMock => {
     if (this.state === "closed") throw new Error("AudioContext is closed");
     const node = new AudioNodeMock();
@@ -100,6 +112,7 @@ class Context {
 
 beforeEach(() => {
   Context.instances = [];
+  browserOutputs.value = [];
   vi.stubGlobal("MediaStream", Stream);
   vi.stubGlobal("AudioContext", Context);
   vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue();
@@ -462,4 +475,87 @@ it("releases volume subscriptions when handset playback ends", () => {
   act(() => setRemoteAudioVolume(call.participant, 0.5));
   expect(context.gains[0].gain.value).toBe(0.1);
   expect(context.sources[0].disconnect).toHaveBeenCalledOnce();
+});
+
+describe("WebKit output routing", () => {
+  const enableBrowserOutputs = (
+    setSinkId = vi.fn().mockResolvedValue(undefined),
+  ) => {
+    browserOutputs.value = [
+      { deviceId: "web-speaker", kind: "audiooutput", label: "Speaker" },
+      { deviceId: "web-receiver", kind: "audiooutput", label: "Receiver" },
+    ] as MediaDeviceInfo[];
+    vi.spyOn(navigator, "userAgent", "get").mockReturnValue(
+      "Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/605.1.15 Version/26.0 Mobile/15E148 Safari/604.1",
+    );
+    Object.defineProperty(HTMLMediaElement.prototype, "setSinkId", {
+      configurable: true,
+      value: setSinkId,
+    });
+    window.__letroAudioOutput = {
+      setSinkId: async (element, id, isCurrent) =>
+        isCurrent() ? element.setSinkId(id) : Promise.resolve(),
+    };
+    return setSinkId;
+  };
+  afterEach(() => {
+    delete window.__letroAudioOutput;
+    delete (HTMLMediaElement.prototype as Partial<HTMLMediaElement>).setSinkId;
+  });
+
+  it("routes actual iOS Handset playback despite LiveKit's Safari exclusion", async () => {
+    const setSinkId = enableBrowserOutputs();
+    expect(supportsAudioOutputSelection()).toBe(false);
+    const call = setup();
+    expect(call.audioOutput.selected$.value?.virtualEarpiece).toBe(false);
+    expect(call.track.attachedElements).toHaveLength(0);
+    await act(async () => {});
+    expect(setSinkId).toHaveBeenCalledWith("web-receiver");
+    expect(Context.instances).toHaveLength(0);
+    expect(call.track.attachedElements).toHaveLength(1);
+    await act(async () => {
+      call.audioOutput.select("web-speaker");
+      await Promise.resolve();
+    });
+    expect(setSinkId).toHaveBeenLastCalledWith("web-speaker");
+    await act(async () => {
+      call.audioOutput.select("web-receiver");
+      await Promise.resolve();
+    });
+    expect(setSinkId).toHaveBeenLastCalledWith("web-receiver");
+    await act(async () => {
+      await call.room.startAudio();
+    });
+    expect(call.track.attachedElements).toHaveLength(1);
+    call.end();
+  });
+
+  it("does not start obsolete audio when selection changes during a pending route", async () => {
+    let finish!: () => void;
+    const setSinkId = enableBrowserOutputs(
+      vi
+        .fn()
+        .mockImplementationOnce(
+          async () =>
+            await new Promise<void>((r) => {
+              finish = r;
+            }),
+        )
+        .mockResolvedValue(undefined),
+    );
+    const call = setup();
+    await act(async () => {});
+    act(() => call.audioOutput.select("web-speaker"));
+    expect(call.track.attachedElements).toHaveLength(0);
+    await act(async () => {
+      finish();
+      await Promise.resolve();
+    });
+    expect(setSinkId.mock.calls.map((c) => c[0])).toEqual([
+      "web-receiver",
+      "web-speaker",
+    ]);
+    expect(call.track.attachedElements).toHaveLength(1);
+    call.end();
+  });
 });

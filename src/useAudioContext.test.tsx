@@ -6,8 +6,8 @@ Please see LICENSE in the repository root for full details.
 */
 
 import { expect, vi, afterEach, beforeEach, test } from "vitest";
-import { type FC } from "react";
-import { render } from "@testing-library/react";
+import { Component, type ReactNode, type FC } from "react";
+import { render, waitFor } from "@testing-library/react";
 import userEvent, { type UserEvent } from "@testing-library/user-event";
 import { BrowserRouter } from "react-router-dom";
 
@@ -120,11 +120,16 @@ const TestAudioContext = vi.fn(
 
 let user: UserEvent;
 beforeEach(() => {
+  window.__letroAudioOutput = {
+    setSinkId: async (element, id, isCurrent) =>
+      isCurrent() ? element.setSinkId(id) : Promise.resolve(),
+  };
   vi.stubGlobal("AudioContext", TestAudioContext);
   user = userEvent.setup();
 });
 
 afterEach(() => {
+  delete window.__letroAudioOutput;
   vi.unstubAllGlobals();
   vi.clearAllMocks();
 });
@@ -203,4 +208,172 @@ test("will use the pan if earpiece is selected", async () => {
     soundEffectVolumeSetting.getValue() * 0.1,
     0,
   );
+});
+
+test("routes tones through media element before exposing playback", async () => {
+  const destination = { stream: { getTracks: () => [] }, disconnect: vi.fn() };
+  const createDestination = vi.fn().mockReturnValue(destination);
+  Object.assign(testAudioContext, {
+    createMediaStreamDestination: createDestination,
+  });
+  const setSink = vi.fn().mockResolvedValue(undefined);
+  Object.defineProperty(HTMLMediaElement.prototype, "setSinkId", {
+    value: setSink,
+    configurable: true,
+  });
+  const connect = vi.spyOn(panNode, "connect");
+  const play = vi
+    .spyOn(HTMLMediaElement.prototype, "play")
+    .mockResolvedValue(undefined);
+  const pause = vi
+    .spyOn(HTMLMediaElement.prototype, "pause")
+    .mockImplementation(() => {});
+  const view = render(
+    <MediaDevicesContext
+      value={mockMediaDevices({
+        audioOutput: {
+          available$: constant(new Map<never, never>()),
+          selected$: constant({
+            id: "receiver",
+            sinkId: "receiver",
+            virtualEarpiece: false,
+          }),
+          select: () => {},
+        },
+      })}
+    >
+      <TestComponentWrapper />
+    </MediaDevicesContext>,
+  );
+  await user.click(await view.findByText("Valid sound"));
+  expect(createDestination).toHaveBeenCalledOnce();
+  expect(setSink).toHaveBeenCalledWith("receiver");
+  expect(play).toHaveBeenCalledOnce();
+  expect(connect).toHaveBeenCalledWith(destination);
+  expect(testAudioContext.setSinkId).not.toHaveBeenCalled();
+  view.unmount();
+  expect(pause).toHaveBeenCalled();
+  expect(destination.disconnect).toHaveBeenCalled();
+  connect.mockRestore();
+  play.mockRestore();
+  pause.mockRestore();
+  Reflect.deleteProperty(HTMLMediaElement.prototype, "setSinkId");
+});
+
+class RoutingErrorBoundary extends Component<
+  { children: ReactNode },
+  { failed: boolean }
+> {
+  state = { failed: false };
+  static getDerivedStateFromError(): { failed: boolean } {
+    return { failed: true };
+  }
+  render(): ReactNode {
+    return this.state.failed ? (
+      <span>Routing failed</span>
+    ) : (
+      this.props.children
+    );
+  }
+}
+
+test("failed sink selection never exposes tone playback or plays default output", async () => {
+  const destination = { stream: { getTracks: () => [] }, disconnect: vi.fn() };
+  Object.assign(testAudioContext, {
+    createMediaStreamDestination: vi.fn().mockReturnValue(destination),
+  });
+  const setSink = vi.fn().mockRejectedValue(new Error("route rejected"));
+  Object.defineProperty(HTMLMediaElement.prototype, "setSinkId", {
+    value: setSink,
+    configurable: true,
+  });
+  const play = vi
+    .spyOn(HTMLMediaElement.prototype, "play")
+    .mockResolvedValue(undefined);
+  const pause = vi
+    .spyOn(HTMLMediaElement.prototype, "pause")
+    .mockImplementation(() => {});
+  const view = render(
+    <RoutingErrorBoundary>
+      <MediaDevicesContext
+        value={mockMediaDevices({
+          audioOutput: {
+            available$: constant(new Map<never, never>()),
+            selected$: constant({
+              id: "receiver",
+              sinkId: "receiver",
+              virtualEarpiece: false,
+            }),
+            select: () => {},
+          },
+        })}
+      >
+        <TestComponentWrapper />
+      </MediaDevicesContext>
+    </RoutingErrorBoundary>,
+  );
+  await waitFor(() => expect(destination.disconnect).toHaveBeenCalled());
+  expect(await view.findByText("Routing failed")).toBeTruthy();
+  expect(view.queryByText("Valid sound")).toBeNull();
+  expect(play).not.toHaveBeenCalled();
+  expect(testAudioContext.createBufferSource).not.toHaveBeenCalled();
+  view.unmount();
+  play.mockRestore();
+  pause.mockRestore();
+  Reflect.deleteProperty(HTMLMediaElement.prototype, "setSinkId");
+});
+
+test("unmounting during sink selection prevents late playback", async () => {
+  const stopTrack = vi.fn();
+  const destination = {
+    stream: { getTracks: () => [{ stop: stopTrack }] },
+    disconnect: vi.fn(),
+  };
+  Object.assign(testAudioContext, {
+    createMediaStreamDestination: vi.fn().mockReturnValue(destination),
+  });
+  let finish!: () => void;
+  const setSink = vi.fn().mockReturnValue(
+    new Promise<void>((resolve) => {
+      finish = resolve;
+    }),
+  );
+  Object.defineProperty(HTMLMediaElement.prototype, "setSinkId", {
+    value: setSink,
+    configurable: true,
+  });
+  const play = vi
+    .spyOn(HTMLMediaElement.prototype, "play")
+    .mockResolvedValue(undefined);
+  const pause = vi
+    .spyOn(HTMLMediaElement.prototype, "pause")
+    .mockImplementation(() => {});
+  const view = render(
+    <MediaDevicesContext
+      value={mockMediaDevices({
+        audioOutput: {
+          available$: constant(new Map<never, never>()),
+          selected$: constant({
+            id: "receiver",
+            sinkId: "receiver",
+            virtualEarpiece: false,
+          }),
+          select: () => {},
+        },
+      })}
+    >
+      <TestComponentWrapper />
+    </MediaDevicesContext>,
+  );
+  await waitFor(() => expect(setSink).toHaveBeenCalled());
+  expect(view.queryByText("Valid sound")).toBeNull();
+  view.unmount();
+  finish();
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(play).not.toHaveBeenCalled();
+  expect(stopTrack).toHaveBeenCalled();
+  play.mockRestore();
+  pause.mockRestore();
+  Reflect.deleteProperty(HTMLMediaElement.prototype, "setSinkId");
 });
