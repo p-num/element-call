@@ -11,13 +11,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useTracks } from "@livekit/components-react";
 import { logger as rootLogger } from "matrix-js-sdk/lib/logger";
 
-import { useObservableEagerState } from "observable-hooks";
-import { getUrlParams } from "../UrlParams";
-import { supportsWebKitAudioOutput } from "../routeAudioOutput";
-import {
-  useMediaDevices,
-  useEarpieceAudioConfig,
-} from "../MediaDevicesContext";
+import { useEarpieceAudioConfig } from "../MediaDevicesContext";
 import * as controls from "../controls";
 import {
   RemoteAudioPlayback,
@@ -48,8 +42,7 @@ export interface MatrixAudioRendererProps {
  * Takes care of handling remote participants’ audio tracks and makes sure that microphones and screen share are audible.
  *
  * It also takes care of the earpiece audio configuration for iOS devices.
- * Routes to browser output devices when WebKit supports selection, retaining
- * the legacy WebAudio earpiece approximation on older iOS versions.
+ * This is done by using the WebAudio API to create a stereo pan effect that mimics the earpiece audio.
  * @example
  * ```tsx
  * <LiveKitRoom>
@@ -96,13 +89,6 @@ export function LivekitRoomAudioRenderer({
       return true;
     });
 
-  const selectedOutput = useObservableEagerState(
-    useMediaDevices().audioOutput.selected$,
-  );
-  const { controlledAudioDevices } = getUrlParams();
-  const awaitingOutput =
-    controlledAudioDevices && supportsWebKitAudioOutput() && !selectedOutput;
-  const sinkId = selectedOutput?.sinkId;
   const { pan, volume } = useEarpieceAudioConfig();
   const useEarpiece = pan !== 0;
   const [audioContext, setAudioContext] = useState<AudioContext>();
@@ -135,18 +121,17 @@ export function LivekitRoomAudioRenderer({
 
   // Do not mount either playback path until the handset context is ready.
   const output = useMemo<RemoteAudioOutput | null>(() => {
-    if (awaitingOutput) return null;
-    if (!useEarpiece) return { type: "html", sinkId };
+    if (!useEarpiece) return { type: "html" };
     if (!audioContext) return null;
     return { type: "earpiece", context: audioContext, pan, volume };
-  }, [useEarpiece, audioContext, pan, volume, sinkId, awaitingOutput]);
+  }, [useEarpiece, audioContext, pan, volume]);
 
   return (
     <div style={{ display: "none" }}>
       {output &&
         tracks.map((trackRef) => (
           <RemoteAudioPlayback
-            key={`${getTrackReferenceId(trackRef)}:${sinkId ?? "native"}`}
+            key={getTrackReferenceId(trackRef)}
             trackRef={trackRef}
             output={output}
             muted={muted}

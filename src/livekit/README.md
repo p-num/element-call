@@ -25,3 +25,15 @@ when playback mounts or a track is replaced.
 `HandsetAudio.test.tsx` exercises these contracts with real LiveKit room, track,
 publication, and attachment behavior. Browser audio hardware is mocked, so these
 tests do not establish physical receiver acoustics or OS background behavior.
+
+## Baseline restoration (September 2026)
+
+The bridge-driven receiver enumeration, route-before-attach and tone relay have
+been removed. Device selection matches the branded pre-audio baseline `b05a45e`.
+The playback owner remains the explicit implementation above because the raw
+upstream renderer reproduces parallel HTML playback after `Room.startAudio()`,
+zero-volume attachment and missed replacement-track attachment in the real-LiveKit
+regression harness. Ringing also retains its readiness/mute lifecycle correction.
+This is the upstream device/tone baseline with playback safeguards, not byte-for-byte
+upstream playback. Legacy gain/pan does not select the physical receiver. Physical
+Handset acceptance remains outstanding; no browser API/test result proves it.

@@ -17,10 +17,6 @@ import { useEarpieceAudioConfig, useMediaDevices } from "./MediaDevicesContext";
 import { type PrefetchedSounds } from "./soundUtils";
 import { useUrlParams } from "./UrlParams";
 import * as controls from "./controls";
-import {
-  routeAudioOutput,
-  supportsWebKitAudioOutput,
-} from "./routeAudioOutput";
 
 /**
  * Play a sound though a given AudioContext. Will take
@@ -41,7 +37,6 @@ async function playSound(
   stereoPan: number,
   delayS = 0,
   abort?: AbortController,
-  destination: AudioNode = ctx.destination,
 ): Promise<void> {
   const gain = ctx.createGain();
   gain.gain.setValueAtTime(volume, 0);
@@ -53,7 +48,7 @@ async function playSound(
     src.disconnect();
   });
   const p = new Promise<void>((r) => src.addEventListener("ended", () => r()));
-  src.connect(gain).connect(pan).connect(destination);
+  src.connect(gain).connect(pan).connect(ctx.destination);
   controls.setPlaybackStarted();
   src.start(ctx.currentTime + delayS);
   return p;
@@ -76,7 +71,6 @@ function playSoundLooping(
   volume: number,
   stereoPan: number,
   delayS?: number,
-  destination: AudioNode = ctx.destination,
 ): () => Promise<void> {
   if (delayS === 0) {
     throw Error("Looping sounds must have a delay");
@@ -92,15 +86,7 @@ function playSoundLooping(
     lastSoundPromise = Promise.resolve();
     do {
       // Queue up the next sound.
-      nextSoundPromise = playSound(
-        ctx,
-        buffer,
-        volume,
-        stereoPan,
-        delayS,
-        ac,
-        destination,
-      );
+      nextSoundPromise = playSound(ctx, buffer, volume, stereoPan, delayS, ac);
       // Await the previous sound.
       await lastSoundPromise;
       // Swap the promises over, and loop round to play the next sound.
@@ -151,22 +137,11 @@ export function useAudioContext<S extends string>(
   const selectedOutput = useObservableEagerState(
     useMediaDevices().audioOutput.selected$,
   );
-  const sinkId = selectedOutput?.sinkId;
   const { controlledAudioDevices } = useUrlParams();
-  const needsSelection =
-    controlledAudioDevices &&
-    supportsWebKitAudioOutput() &&
-    sinkId === undefined;
-  const [routingError, setRoutingError] = useState<Error>();
-  const [routedOutput, setRoutedOutput] = useState<{
-    sinkId: string;
-    context: AudioContext;
-    destination: AudioNode;
-  }>();
 
   useEffect(() => {
     const sounds = props.sounds;
-    if (!sounds || needsSelection) {
+    if (!sounds) {
       return;
     }
     const ctx = new AudioContext({
@@ -198,54 +173,15 @@ export function useAudioContext<S extends string>(
       });
       setAudioContext(undefined);
     };
-  }, [props.sounds, props.latencyHint, needsSelection]);
+  }, [props.sounds, props.latencyHint]);
 
   const audioOutputId = selectedOutput?.id;
-  useEffect(() => {
-    setRoutingError(undefined);
-    if (!audioContext || sinkId === undefined) return;
-    let disposed = false;
-    const destination = audioContext.createMediaStreamDestination();
-    const element = document.createElement("audio");
-    element.srcObject = destination.stream;
-    const dispose = (): void => {
-      element.pause();
-      element.srcObject = null;
-      destination.disconnect();
-      destination.stream.getTracks().forEach((track) => track.stop());
-    };
-    void (async () => {
-      if (!(await routeAudioOutput(element, sinkId, () => !disposed))) return;
-      if (disposed) return;
-      await element.play();
-      if (disposed) {
-        dispose();
-        return;
-      }
-      setRoutedOutput({ sinkId, context: audioContext, destination });
-    })().catch((error) => {
-      if (!disposed) {
-        logger.error("Unable to route call sound effects", error);
-        setRoutingError(
-          new Error("Unable to select call audio output", { cause: error }),
-        );
-      }
-      dispose();
-    });
-    return () => {
-      disposed = true;
-      setRoutedOutput(undefined);
-      dispose();
-    };
-  }, [audioContext, sinkId]);
-
   // Update the sink ID whenever we change devices.
   useEffect(() => {
     if (
       audioContext &&
       "setSinkId" in audioContext &&
-      !controlledAudioDevices &&
-      sinkId === undefined
+      !controlledAudioDevices
     ) {
       // https://developer.mozilla.org/en-US/docs/Web/API/AudioContext/setSinkId
       // @ts-expect-error - setSinkId doesn't exist yet in types, maybe because it's not supported everywhere.
@@ -253,20 +189,11 @@ export function useAudioContext<S extends string>(
         logger.warn("Unable to change sink for audio context", ex);
       });
     }
-  }, [audioContext, audioOutputId, controlledAudioDevices, sinkId]);
+  }, [audioContext, audioOutputId, controlledAudioDevices]);
   const { pan: earpiecePan, volume: earpieceVolume } = useEarpieceAudioConfig();
 
   const audio = useMemo(() => {
-    if (!audioContext || !audioBuffers || props.muted || needsSelection)
-      return null;
-    const destination =
-      sinkId === undefined
-        ? audioContext.destination
-        : routedOutput?.sinkId === sinkId &&
-            routedOutput.context === audioContext
-          ? routedOutput.destination
-          : undefined;
-    if (sinkId !== undefined && !destination) return null;
+    if (!audioContext || !audioBuffers || props.muted) return null;
     return {
       playSound: async (name: S, volumeOverwrite?: number): Promise<void> => {
         if (!audioBuffers[name]) {
@@ -278,9 +205,6 @@ export function useAudioContext<S extends string>(
           audioBuffers[name],
           volumeOverwrite ?? soundEffectVolume * earpieceVolume,
           earpiecePan,
-          0,
-          undefined,
-          destination,
         );
       },
       playSoundLooping: (name: S, delayS?: number): (() => Promise<void>) => {
@@ -292,7 +216,6 @@ export function useAudioContext<S extends string>(
           soundEffectVolume * earpieceVolume,
           earpiecePan,
           delayS,
-          destination,
         );
       },
       soundDuration: Object.fromEntries(
@@ -306,13 +229,9 @@ export function useAudioContext<S extends string>(
     audioContext,
     audioBuffers,
     props.muted,
-    needsSelection,
-    sinkId,
-    routedOutput,
     soundEffectVolume,
     earpieceVolume,
     earpiecePan,
   ]);
-  if (routingError) throw routingError;
   return audio;
 }
