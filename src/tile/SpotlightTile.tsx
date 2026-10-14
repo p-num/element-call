@@ -26,11 +26,10 @@ import {
   VolumeOnSolidIcon,
 } from "@vector-im/compound-design-tokens/assets/web/icons";
 import { animated } from "@react-spring/web";
-import { type Observable, map } from "rxjs";
-import { useObservableRef } from "observable-hooks";
+import { BehaviorSubject, type Observable, map } from "rxjs";
 import { useTranslation } from "react-i18next";
 import classNames from "classnames";
-import { type TrackReferenceOrPlaceholder } from "@livekit/components-core";
+import { type VideoMediaTrack } from "@element-hq/matrixrtc-sdk";
 import { Menu, MenuItem, Text } from "@vector-im/compound-web";
 
 import FullScreenMaximiseIcon from "../icons/FullScreenMaximise.svg?react";
@@ -54,6 +53,8 @@ import { Slider } from "../Slider";
 import { platform } from "../Platform";
 import { type RingingMediaViewModel } from "../state/media/RingingMediaViewModel";
 import { RingingStatus } from "./RingingStatus";
+import { useRootElement } from "../RootElementContext";
+import { type Transport } from "matrix-js-sdk/lib/matrixrtc";
 
 interface SpotlightItemBaseProps {
   ref?: Ref<HTMLDivElement>;
@@ -72,9 +73,9 @@ interface SpotlightItemBaseProps {
 }
 
 interface SpotlightMemberMediaItemBaseProps extends SpotlightItemBaseProps {
-  video: TrackReferenceOrPlaceholder | undefined;
+  video: VideoMediaTrack | undefined;
   unencryptedWarning: boolean;
-  focusUrl: string | undefined;
+  transport: Transport | undefined;
 }
 
 interface SpotlightUserMediaItemBaseProps extends SpotlightMemberMediaItemBaseProps {
@@ -177,13 +178,13 @@ const SpotlightMemberMediaItem: FC<SpotlightMemberMediaItemProps> = ({
 }) => {
   const video = useBehavior(vm.video$);
   const unencryptedWarning = useBehavior(vm.unencryptedWarning$);
-  const focusUrl = useBehavior(vm.focusUrl$);
+  const transport = useBehavior(vm.transport$);
 
   const baseProps: SpotlightMemberMediaItemBaseProps &
     RefAttributes<HTMLDivElement> = {
     video: video ?? undefined,
     unencryptedWarning,
-    focusUrl,
+    transport,
     ...props,
   };
 
@@ -414,7 +415,14 @@ export const SpotlightTile: FC<Props> = ({
   style,
 }) => {
   const { t } = useTranslation();
-  const [ourRef, root$] = useObservableRef<HTMLDivElement | null>(null);
+  const rootElement = useRootElement();
+  const root$ = useInitial(
+    () => new BehaviorSubject<HTMLDivElement | null>(null),
+  );
+  const ourRef = useCallback(
+    (root: HTMLDivElement | null) => root$.next(root),
+    [root$],
+  );
   const ref = useMergedRefs(ourRef, theirRef);
   const maximised = useBehavior(vm.maximised$);
   const background = useBehavior(vm.background$);
@@ -428,24 +436,22 @@ export const SpotlightTile: FC<Props> = ({
   const canGoToNext = visibleIndex !== -1 && visibleIndex < media.length - 1;
 
   const isFullscreen = useCallback((): boolean => {
-    const rootElement = document.body;
     if (rootElement && document.fullscreenElement) return true;
     return false;
-  }, []);
+  }, [rootElement]);
 
   const FullScreenIcon = isFullscreen()
     ? FullScreenMinimiseIcon
     : FullScreenMaximiseIcon;
 
   const onToggleFullscreen = useCallback(() => {
-    const rootElement = document.body;
     if (!rootElement) return;
     if (isFullscreen()) {
       void document?.exitFullscreen();
     } else {
       void rootElement.requestFullscreen();
     }
-  }, [isFullscreen]);
+  }, [isFullscreen, rootElement]);
 
   // To keep track of which item is visible, we need an intersection observer
   // hooked up to the root element and the items. Because the items will run

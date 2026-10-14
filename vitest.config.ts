@@ -1,6 +1,6 @@
 import { defineConfig, mergeConfig } from "vitest/config";
 import { playwright } from "@vitest/browser-playwright";
-import { vitePluginsConfig } from "./vite.config";
+import { vitePluginsConfig } from "./vite.config.ts";
 import { storybookTest } from "@storybook/addon-vitest/vitest-plugin";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -21,7 +21,13 @@ export default defineConfig((configEnv) =>
               css: { include: /.+/ },
               setupFiles: ["src/vitest.setup.ts"],
               environment: "jsdom",
-              include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
+              include: [
+                "src/**/*.test.ts",
+                "src/**/*.test.tsx",
+                "component/**/*.test.ts",
+                "component/**/*.test.tsx",
+                "sdk/**/*.test.ts",
+              ],
             },
           },
           {
@@ -32,6 +38,8 @@ export default defineConfig((configEnv) =>
               }),
               ...vitePluginsConfig(configEnv).plugins!,
             ],
+            // The stories import the SDK by its package name like the app does
+            resolve: vitePluginsConfig(configEnv).resolve,
             test: {
               name: "storybook",
               browser: {
@@ -46,13 +54,18 @@ export default defineConfig((configEnv) =>
         ],
         coverage: {
           reporter: ["html", "json"],
-          include: ["src/**/*.{ts,tsx,js,jsx}"],
+          include: ["src/**/*.{ts,tsx,js,jsx}", "sdk/**/*.ts"],
           exclude: [
             "src/**/*.md",
             "src/**/*.{d,test,stories}.{ts,tsx}",
             "src/utils/test.ts",
             "src/utils/test-viewmodel.ts",
             "src/utils/test-fixtures.ts",
+            "sdk/**/*.{d,test}.ts",
+            "sdk/**/test.ts",
+            "sdk/**/test-fixtures.ts",
+            "sdk/dev/**",
+            "sdk/dist/**",
             "playwright/**",
           ],
         },

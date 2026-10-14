@@ -5,6 +5,9 @@ SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Element-Commercial
 Please see LICENSE in the repository root for full details.
 */
 
+import { getProductName } from "../branding/brand";
+import { useBrand } from "../branding/useBrand";
+
 import { ErrorBoundary, type FallbackRender } from "@sentry/react";
 import {
   type ComponentType,
@@ -34,7 +37,6 @@ import {
 } from "../utils/errors.ts";
 import { FullScreenView } from "../FullScreenView.tsx";
 import { ErrorView } from "../ErrorView.tsx";
-import { type WidgetHelpers } from "../widget.ts";
 import styles from "../ErrorView.module.css";
 
 export type CallErrorRecoveryAction = "reconnect"; // | "retry" ;
@@ -47,14 +49,13 @@ interface ErrorPageProps {
   error: ElementCallError;
   recoveryActionHandler: RecoveryActionHandler;
   resetError: () => void;
-  widget: WidgetHelpers | null;
 }
 
 const ErrorPage: FC<ErrorPageProps> = ({
   error,
   recoveryActionHandler,
-  widget,
 }: ErrorPageProps): ReactElement => {
+  const brand = useBrand();
   const { t } = useTranslation();
   logger.error("Error boundary caught:", error);
   let icon: ComponentType<SVGAttributes<SVGElement>>;
@@ -89,14 +90,16 @@ const ErrorPage: FC<ErrorPageProps> = ({
         Icon={icon}
         title={error.localisedTitle}
         rageshake={error.code == ErrorCode.UNKNOWN_ERROR}
-        widget={widget}
       >
         <p>
           {error.localisedMessageKey ? (
             <Trans
               // @ts-expect-error - Dynamic i18nKey from error object
               i18nKey={error.localisedMessageKey}
-              values={error.localisedMessageValues}
+              values={{
+                ...error.localisedMessageValues,
+                brand: getProductName(brand),
+              }}
               components={[
                 <a
                   href={String(error.localisedMessageValues?.linkUrl || "#")}
@@ -148,14 +151,12 @@ interface BoundaryProps {
   children: ReactNode | (() => ReactNode);
   recoveryActionHandler: RecoveryActionHandler;
   onError?: (error: unknown) => void;
-  widget: WidgetHelpers | null;
 }
 
 export const GroupCallErrorBoundary = ({
   recoveryActionHandler,
   onError,
   children,
-  widget,
 }: BoundaryProps): ReactElement => {
   const fallbackRenderer: FallbackRender = useCallback(
     ({ error, resetError }): ReactElement => {
@@ -165,7 +166,6 @@ export const GroupCallErrorBoundary = ({
           : new UnknownCallError(error instanceof Error ? error : new Error());
       return (
         <ErrorPage
-          widget={widget ?? null}
           error={callError}
           resetError={resetError}
           recoveryActionHandler={async (action: CallErrorRecoveryAction) => {
@@ -175,7 +175,7 @@ export const GroupCallErrorBoundary = ({
         />
       );
     },
-    [recoveryActionHandler, widget],
+    [recoveryActionHandler],
   );
 
   return (

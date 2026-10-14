@@ -6,12 +6,12 @@ Please see LICENSE in the repository root for full details.
 */
 
 import { getProductName } from "./branding/brand";
+import { useBrand } from "./branding/useBrand";
 import { useTranslation } from "react-i18next";
 import { PopOutIcon } from "@vector-im/compound-design-tokens/assets/web/icons";
 
 import type { FC, ReactNode } from "react";
 import { ErrorView } from "./ErrorView";
-import { widget } from "./widget.ts";
 
 /**
  * An error consisting of a terse message to be logged to the console and a
@@ -30,17 +30,14 @@ export class RichError extends Error {
 }
 
 const OpenElsewhere: FC = () => {
+  const brand = useBrand();
   const { t } = useTranslation();
 
   return (
-    <ErrorView
-      widget={widget}
-      Icon={PopOutIcon}
-      title={t("error.open_elsewhere")}
-    >
+    <ErrorView Icon={PopOutIcon} title={t("error.open_elsewhere")}>
       <p>
         {t("error.open_elsewhere_description", {
-          brand: getProductName(),
+          brand: getProductName(brand),
         })}
       </p>
     </ErrorView>

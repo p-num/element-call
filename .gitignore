@@ -10,6 +10,9 @@ public/config.json
 backend/synapse_tmp/*
 backend/synapse_tmp_othersite/*
 /coverage
+
+# Transient agent scratch files
+/agent-workspace/
 config.json
 
 # Yarn
@@ -42,3 +45,5 @@ storybook-static
 # Generated from the typed brand contract whenever Vite starts.
 /src/branding/generated.css
 /letro-packages/
+# Nested checkout made by scripts/layered.sh
+/matrix-js-sdk/

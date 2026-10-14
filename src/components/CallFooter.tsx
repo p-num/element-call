@@ -8,7 +8,8 @@ Please see LICENSE in the repository root for full details.
 import { type FC, type JSX, type Ref, useMemo } from "react";
 import classNames from "classnames";
 
-import { getCallBrand, getProductName } from "../branding/brand";
+import { getProductName } from "../branding/brand";
+import { useBrand } from "../branding/useBrand";
 import { BrandLogo } from "../branding/BrandLogo";
 import LogoMark from "../icons/LogoMark.svg?react";
 import LogoType from "../icons/LogoType.svg?react";
@@ -101,11 +102,15 @@ export interface FooterState {
 
   /** Providing no options `[]` or `undefined` will imply that we dont have a audio fast switcher */
   audioOptions: MenuOptions[];
+  /** Output (speaker) devices. */
+  audioOutputOptions: MenuOptions[];
   /** Providing no options `[]` or `undefined` will imply that we dont have a audio fast switcher */
   videoOptions: MenuOptions[];
   selectedAudio: string | undefined;
+  selectedAudioOutput: string | undefined;
   selectedVideo: string | undefined;
   selectAudioButtonOption: ((deviceId: string) => void) | undefined;
+  selectAudioOutputOption: ((deviceId: string) => void) | undefined;
   selectVideoButtonOption: ((option: string) => void) | undefined;
 }
 
@@ -121,6 +126,7 @@ export const CallFooter: FC<FooterProps> = ({
   children,
   vm,
 }) => {
+  const brand = useBrand();
   const asOverlay = useBehavior(vm.asOverlay$);
   const showFooter = useBehavior(vm.showFooter$);
   const hideControls = useBehavior(vm.hideControls$);
@@ -145,6 +151,9 @@ export const CallFooter: FC<FooterProps> = ({
   const audioOptions = useBehavior(vm.audioOptions$);
   const selectedAudio = useBehavior(vm.selectedAudio$);
   const selectAudioButtonOption = useBehavior(vm.selectAudioButtonOption$);
+  const audioOutputOptions = useBehavior(vm.audioOutputOptions$);
+  const selectedAudioOutput = useBehavior(vm.selectedAudioOutput$);
+  const selectAudioOutputOption = useBehavior(vm.selectAudioOutputOption$);
   const selectVideoButtonOption = useBehavior(vm.selectVideoButtonOption$);
   const toggleBlur = useBehavior(vm.toggleBlur$);
   const videoBlurEnabled = useBehavior(vm.videoBlurEnabled$);
@@ -170,7 +179,6 @@ export const CallFooter: FC<FooterProps> = ({
   if ((audioOptions?.length ?? 0) > 0) {
     buttons.push(
       <MediaMuteAndSwitchButton
-        title={"Mic Source"}
         key="audio"
         iconsAndLabels="audio"
         enabled={audioEnabled ?? false}
@@ -180,6 +188,9 @@ export const CallFooter: FC<FooterProps> = ({
         options={audioOptions}
         selectedOption={selectedAudio}
         onSelect={selectAudioButtonOption}
+        outputOptions={audioOutputOptions}
+        selectedOutputOption={selectedAudioOutput}
+        onSelectOutput={selectAudioOutputOption}
       />,
     );
   } else {
@@ -199,7 +210,6 @@ export const CallFooter: FC<FooterProps> = ({
   if ((videoOptions?.length ?? 0) > 0) {
     buttons.push(
       <MediaMuteAndSwitchButton
-        title={"Camera Source"}
         key="video"
         iconsAndLabels="video"
         enabled={videoEnabled ?? false}
@@ -280,14 +290,14 @@ export const CallFooter: FC<FooterProps> = ({
     <div className={styles.logo}>
       {showLogo && (
         <>
-          {getCallBrand() === "element" && (
+          {brand === "element" && (
             <LogoMark width={24} height={24} aria-hidden />
           )}
           <BrandLogo
             element={LogoType}
             width={80}
             height={11}
-            aria-label={getProductName()}
+            aria-label={getProductName(brand)}
           />
         </>
       )}

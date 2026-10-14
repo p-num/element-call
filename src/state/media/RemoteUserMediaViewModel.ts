@@ -6,34 +6,32 @@ SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Element-Commercial
 Please see LICENSE in the repository root for full details.
 */
 
-import { type RemoteParticipant } from "livekit-client";
+import {
+  type Behavior,
+  type ObservableScope,
+  trackBySource$,
+} from "@element-hq/matrixrtc-sdk";
 import { combineLatest, map, of, switchMap } from "rxjs";
+import { logger } from "matrix-js-sdk/lib/logger";
 
-import { setRemoteAudioVolume } from "../../livekit/RemoteAudioVolume";
-import { type Behavior } from "../Behavior";
 import { createVolumeControls, type VolumeControls } from "../VolumeControls";
 import {
   type BaseUserMediaInputs,
   type BaseUserMediaViewModel,
   createBaseUserMedia,
 } from "./UserMediaViewModel";
-import { type ObservableScope } from "../ObservableScope";
 
 export interface RemoteUserMediaViewModel
   extends BaseUserMediaViewModel, VolumeControls {
   local: false;
   /**
-   * Whether we are waiting for this user's LiveKit participant to exist. This
-   * could be because either we or the remote party are still connecting.
+   * Whether we are waiting for this user's media to arrive. This could be
+   * because either we or the remote party are still connecting.
    */
   waitingForMedia$: Behavior<boolean>;
 }
 
-export interface RemoteUserMediaInputs extends Omit<
-  BaseUserMediaInputs,
-  "statsType"
-> {
-  participant$: Behavior<RemoteParticipant | null>;
+export interface RemoteUserMediaInputs extends BaseUserMediaInputs {
   pretendToBeDisconnected$: Behavior<boolean>;
 }
 
@@ -41,9 +39,19 @@ export function createRemoteUserMedia(
   scope: ObservableScope,
   { pretendToBeDisconnected$, ...inputs }: RemoteUserMediaInputs,
 ): RemoteUserMediaViewModel {
-  const baseUserMedia = createBaseUserMedia(scope, {
-    ...inputs,
-    statsType: "inbound-rtp",
+  const baseUserMedia = createBaseUserMedia(scope, inputs);
+
+  const waitingForMedia$ = scope.behavior(
+    combineLatest(
+      [inputs.transport$, inputs.member.tracks$],
+      // Without a transport the user is not attempting to publish anywhere
+      // and so we shouldn't expect media. (They might be a subscribe-only bot
+      // for example.)
+      (transport, tracks) => transport !== undefined && tracks === null,
+    ),
+  );
+  waitingForMedia$.pipe(scope.bind()).subscribe((waiting) => {
+    logger.info(`[RemoteUserMedia ${inputs.id}] waitingForMedia=${waiting}`);
   });
 
   return {
@@ -51,8 +59,8 @@ export function createRemoteUserMedia(
     ...createVolumeControls(scope, {
       pretendToBeDisconnected$,
       sink$: scope.behavior(
-        inputs.participant$.pipe(
-          map((p) => (volume) => setRemoteAudioVolume(p, volume)),
+        trackBySource$(scope, inputs.member.tracks$, "microphone").pipe(
+          map((track) => (volume: number) => track?.setVolume(volume)),
         ),
       ),
     }),
@@ -71,15 +79,6 @@ export function createRemoteUserMedia(
         ),
       ),
     ),
-    waitingForMedia$: scope.behavior(
-      combineLatest(
-        [inputs.livekitRoom$, inputs.participant$],
-        (livekitRoom, participant) =>
-          // If livekitRoom is undefined, the user is not attempting to publish on
-          // any transport and so we shouldn't expect a participant. (They might
-          // be a subscribe-only bot for example.)
-          livekitRoom !== undefined && participant === null,
-      ),
-    ),
+    waitingForMedia$,
   };
 }

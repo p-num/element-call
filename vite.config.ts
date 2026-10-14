@@ -24,10 +24,19 @@ import babel from "@rolldown/plugin-babel";
 import react, { reactCompilerPreset } from "@vitejs/plugin-react";
 import { realpathSync } from "fs";
 import * as fs from "node:fs";
+import { fileURLToPath } from "node:url";
 
 export const vitePluginsConfig = ({
   mode,
-}: Pick<ConfigEnv, "mode">): UserConfig => {
+  html = true,
+}: Pick<ConfigEnv, "mode"> & {
+  /**
+   * Whether to inject Element Call's entry point into the HTML page. Builds
+   * that produce a library, or serve a page of their own, must not have this:
+   * it would pull the standalone app in alongside whatever they are building.
+   */
+  html?: boolean;
+}): UserConfig => {
   const env = loadEnv(mode, process.cwd());
   fs.writeFileSync(
     new URL("./src/branding/generated.css", import.meta.url),
@@ -82,7 +91,7 @@ export const vitePluginsConfig = ({
     );
   }
 
-  if (!process.env.STORYBOOK && !process.env.VITEST) {
+  if (html && !process.env.STORYBOOK && !process.env.VITEST) {
     plugins.push(
       createHtmlPlugin({
         entry: "src/main.tsx",
@@ -96,7 +105,18 @@ export const vitePluginsConfig = ({
     );
   }
 
-  return { plugins };
+  return {
+    plugins,
+    resolve: {
+      alias: {
+        // The SDK by its package name, resolved to its source, for every
+        // config built on this one: see the matching entry in tsconfig.json
+        "@element-hq/matrixrtc-sdk": fileURLToPath(
+          new URL("./sdk/index.ts", import.meta.url),
+        ),
+      },
+    },
+  };
 };
 // https://vitejs.dev/config/
 // Modified type helper from defineConfig to allow for packageType (see defineConfig from vite)
@@ -168,6 +188,9 @@ export default ({
         // which Vite for some reason refuses to work with, so we point it to
         // src/index.ts instead
         "matrix-widget-api": "matrix-widget-api/src/index.ts",
+        "@element-hq/matrixrtc-sdk": fileURLToPath(
+          new URL("./sdk/index.ts", import.meta.url),
+        ),
       },
       dedupe: [
         "react",

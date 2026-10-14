@@ -63,10 +63,10 @@
   "developer_mode": {
     "always_show_iphone_earpiece": "Show iPhone earpiece option on all platforms",
     "crypto_version": "Crypto version: {{version}}",
-    "custom_livekit_url": {
-      "current_url": "Currently set to: ",
+    "custom_transport": {
+      "current": "Currently set to: ",
       "from_config": "Currently, no overwrite is set. Url from config is used.",
-      "label": "Custom Livekit-url",
+      "label": "Custom transport JSON",
       "reset": "Reset overwrite",
       "save": "Save",
       "saving": "Saving..."
@@ -120,6 +120,7 @@
     "peer_connection_timeout_description": "Connection to the media server timed out. Try switching to a different network or disabling your VPN. If the problem persists, see our <0>troubleshooting guide</0> or contact your server administrator.",
     "room_creation_restricted": "Failed to create call",
     "room_creation_restricted_description": "Call creation might be restricted to authorized users only. Try again later, or contact your server admin if the problem persists.",
+    "screen_share_failed": "Could not start screen sharing",
     "sticky_events_required": "Homeserver does not support Matrix 2.0 calls",
     "sticky_events_required_description": "This deployment is configured to use Matrix 2.0 call mode, but the homeserver does not advertise support for sticky events (MSC4354). Ask your server admin to upgrade, or switch the deployment to a compatible mode.",
     "unexpected_ec_error": "An unexpected error occurred (<0>Error Code:</0> <1>{{ errorCode }}</1>). Please contact your server admin."
@@ -166,6 +167,12 @@
   "login_auth_links_prompt": "Not registered yet?",
   "login_subheading": "To continue to Element",
   "login_title": "Login",
+  "microphone_level": {
+    "label": "Microphone level",
+    "no_device": "No microphone found. Connect one, then try again.",
+    "permission_denied": "Microphone access is blocked. Allow it, then try again.",
+    "value": "{{level}} of {{max}}"
+  },
   "microphone_off": "Microphone off",
   "microphone_on": "Microphone on",
   "mute_microphone_button_label": "Mute microphone",
@@ -218,11 +225,14 @@
       "activating": "Activating…",
       "camera": "Camera",
       "camera_numbered": "Camera {{n}}",
+      "camera_source": "Camera Source",
       "change_device_button": "Change audio device",
       "default": "Default",
       "default_named": "Default <2>({{name}})</2>",
+      "default_named_plain": "Default ({{name}})",
       "handset": "Handset",
       "loudspeaker": "Loudspeaker",
+      "mic_source": "Mic Source",
       "microphone": "Microphone",
       "microphone_numbered": "Microphone {{n}}",
       "speaker": "Speaker",

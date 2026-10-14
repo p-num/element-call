@@ -10,6 +10,11 @@ it("preserves Element when no host or deployment opts in", async () => {
   const { getCallBrand } = await import("./brand");
   expect(getCallBrand()).toBe("element");
 });
+it("does not adopt the host page URL before standalone initialization", async () => {
+  params.brand = "letro";
+  const { getCallBrand } = await import("./brand");
+  expect(getCallBrand()).toBe("element");
+});
 it("initializes deployment branding even after a default component render", async () => {
   const { initializeCallBrand, getCallBrand, getProductName } =
     await import("./brand");

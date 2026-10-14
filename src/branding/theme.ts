@@ -148,7 +148,7 @@ export function generateThemeCSS(): string {
           value,
         ]),
       );
-      return `body[data-call-brand="letro"].cpd-theme-${appearance} {\n${Object.entries(
+      return `[data-element-call-root][data-call-brand="letro"].cpd-theme-${appearance} {\n${Object.entries(
         { ...tokens, ...compoundTokens(appearance) },
       )
         .map(([key, value]) => `  ${key}: ${value};`)

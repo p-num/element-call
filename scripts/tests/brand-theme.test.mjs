@@ -73,7 +73,11 @@ for (const appearance of ["light", "dark", "light-hc", "dark-hc"]) {
 }
 test("generated selectors cannot affect default Element branding", () => {
   const css = generateThemeCSS();
-  assert.equal((css.match(/body\[data-call-brand="letro"\]/g) || []).length, 4);
+  assert.equal(
+    (css.match(/\[data-element-call-root\]\[data-call-brand="letro"\]/g) || [])
+      .length,
+    4,
+  );
   assert.doesNotMatch(css, /:root|!important/);
   assert.equal(css, generateThemeCSS());
 });

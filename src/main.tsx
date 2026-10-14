@@ -28,6 +28,7 @@ import { init as initRageshake } from "./settings/rageshake";
 import { Initializer } from "./initializer";
 import { AppViewModel } from "./state/AppViewModel";
 import { globalScope } from "./state/ObservableScope";
+import { getUrlParams } from "./UrlParams";
 
 initRageshake().catch((e) => {
   logger.error("Failed to initialize rageshake", e);
@@ -55,21 +56,31 @@ if (fatalError !== null) {
 }
 
 Initializer.initBeforeReact()
-  .then(async () => {
+  .then(async (widget) => {
     await Config.init();
     initializeCallBrand(Config.get().brand);
-    document.body.dataset.callBrand = getCallBrand();
     document.title = getProductName();
     if (getCallBrand() === "letro") {
-      const icon = document.querySelector<HTMLLinkElement>('link[rel="icon"]');
-      if (icon) {
-        icon.href = letroIcon;
-        icon.type = "image/png";
-      }
+      const icon =
+        document.querySelector<HTMLLinkElement>('link[rel="icon"]') ??
+        document.createElement("link");
+      icon.rel = "icon";
+      icon.href = letroIcon;
+      icon.type = "image/png";
+      if (!icon.isConnected) document.head.append(icon);
     }
+    const { controlledAudioDevices, callIntent } = getUrlParams();
     root.render(
       <StrictMode>
-        <App vm={new AppViewModel(globalScope)} />
+        <App
+          vm={
+            new AppViewModel(globalScope, {
+              controlledAudioDevices,
+              callIntent,
+            })
+          }
+          widget={widget}
+        />
       </StrictMode>,
     );
   })

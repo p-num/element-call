@@ -12,11 +12,10 @@ export function initializeCallBrand(deploymentBrand?: unknown): void {
   brand = parseBrand(navigationBrand ?? deploymentBrand);
 }
 export function getCallBrand(): CallBrand {
-  if (brand === undefined) initializeCallBrand();
-  return brand!;
+  return brand ?? "element";
 }
-export function getProductName(): string {
-  return getCallBrand() === "letro"
+export function getProductName(brand: CallBrand = getCallBrand()): string {
+  return brand === "letro"
     ? "Letro"
     : import.meta.env.VITE_PRODUCT_NAME || "Element Call";
 }
