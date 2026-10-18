@@ -13,9 +13,8 @@ export function observeHostConnection(
   connected$: Observable<boolean>,
   notify: HostBridge["notifyConnectionState"],
 ): Subscription {
-  let sequence = 0;
   return connected$.pipe(distinctUntilChanged()).subscribe((connected) => {
-    notify?.({ connected, sequence: sequence++ }).catch((error) => {
+    notify?.({ connected }).catch((error) => {
       logger.warn("Failed to report the call connection to the host", error);
     });
   });

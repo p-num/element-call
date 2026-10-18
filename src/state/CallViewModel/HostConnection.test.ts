@@ -20,9 +20,9 @@ describe("host connection reports", () => {
     subscription.unsubscribe();
     connected.next(true);
     expect(notify.mock.calls).toEqual([
-      [{ connected: false, sequence: 0 }],
-      [{ connected: true, sequence: 1 }],
-      [{ connected: false, sequence: 2 }],
+      [{ connected: false }],
+      [{ connected: true }],
+      [{ connected: false }],
     ]);
   });
 

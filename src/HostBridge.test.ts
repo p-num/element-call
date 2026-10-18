@@ -9,7 +9,7 @@ import { describe, expect, test, vi } from "vitest";
 import { type WidgetApi, WidgetApiToWidgetAction } from "matrix-widget-api";
 import EventEmitter from "events";
 
-import { type Observable } from "rxjs";
+import { type Observable, Subject } from "rxjs";
 
 import {
   createWidgetHostBridge,
@@ -17,6 +17,7 @@ import {
   nullHostBridge,
 } from "./HostBridge";
 import { ElementWidgetActions, type WidgetHelpers } from "./widget";
+import { observeHostConnection } from "./state/CallViewModel/HostConnection";
 
 function mockWidget(api: Partial<WidgetApi>): WidgetHelpers {
   return {
@@ -76,8 +77,51 @@ describe("createWidgetHostBridge", () => {
     test("sends local connection state separately from join intent", async () => {
       const transport = mockTransport();
       const bridge = createWidgetHostBridge(mockWidget({ transport } as never));
-      await bridge.notifyConnectionState?.({ connected: true, sequence: 1 });
-      expect(transport.send).toHaveBeenCalledWith(ElementWidgetActions.ConnectionState, { connected: true, sequence: 1 });
+      await bridge.notifyConnectionState?.({ connected: true });
+      expect(transport.send).toHaveBeenCalledWith(
+        ElementWidgetActions.ConnectionState,
+        { connected: true, sequence: 0 },
+      );
+    });
+
+    test("keeps connection reports ordered across recovery observation scopes", () => {
+      const transport = mockTransport();
+      const bridge = createWidgetHostBridge(mockWidget({ transport } as never));
+      const first = new Subject<boolean>();
+      const subscription = observeHostConnection(
+        first,
+        bridge.notifyConnectionState,
+      );
+      first.next(false);
+      first.next(true);
+      subscription.unsubscribe();
+      const retry = new Subject<boolean>();
+      const recovered = observeHostConnection(
+        retry,
+        bridge.notifyConnectionState,
+      );
+      retry.next(false);
+      retry.next(true);
+      first.next(false);
+      recovered.unsubscribe();
+      expect(transport.send.mock.calls).toEqual([
+        [
+          ElementWidgetActions.ConnectionState,
+          { connected: false, sequence: 0 },
+        ],
+        [
+          ElementWidgetActions.ConnectionState,
+          { connected: true, sequence: 1 },
+        ],
+        [
+          ElementWidgetActions.ConnectionState,
+          { connected: false, sequence: 2 },
+        ],
+        [
+          ElementWidgetActions.ConnectionState,
+          { connected: true, sequence: 3 },
+        ],
+      ]);
     });
 
     test("sends the mute state the host needs to mirror", async () => {
