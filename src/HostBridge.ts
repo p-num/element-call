@@ -74,6 +74,8 @@ export interface HostBridge {
   contentLoaded(): Promise<void>;
   /** Tells the host that the user has joined the call. */
   notifyJoined(): Promise<void>;
+  /** Current local MatrixRTC and media connection; never inferred from join intent. */
+  notifyConnectionState?(state: { connected: boolean; sequence: number }): Promise<void>;
   /** Tells the host that the user has hung up. */
   notifyHungUp(): Promise<void>;
   /** Tells the host the user's current audio and video mute state. */
@@ -184,6 +186,7 @@ export function createWidgetHostBridge(widget: WidgetHelpers): HostBridge {
     },
     contentLoaded: async () => widget.api.sendContentLoaded(),
     notifyJoined: async () => send(ElementWidgetActions.JoinCall),
+    notifyConnectionState: async (state) => send(ElementWidgetActions.ConnectionState, state),
     notifyHungUp: async () => send(ElementWidgetActions.HangupCall),
     notifyDeviceMute: async (state) =>
       send(ElementWidgetActions.DeviceMute, state),

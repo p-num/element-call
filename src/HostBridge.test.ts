@@ -73,6 +73,13 @@ describe("createWidgetHostBridge", () => {
       expect(transport.send).toHaveBeenCalledWith(action, payload);
     });
 
+    test("sends local connection state separately from join intent", async () => {
+      const transport = mockTransport();
+      const bridge = createWidgetHostBridge(mockWidget({ transport } as never));
+      await bridge.notifyConnectionState?.({ connected: true, sequence: 1 });
+      expect(transport.send).toHaveBeenCalledWith(ElementWidgetActions.ConnectionState, { connected: true, sequence: 1 });
+    });
+
     test("sends the mute state the host needs to mirror", async () => {
       const transport = mockTransport();
       const bridge = createWidgetHostBridge(mockWidget({ transport } as never));

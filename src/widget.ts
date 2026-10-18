@@ -27,6 +27,7 @@ import { ElementCallReactionEventType } from "./reactions";
 // Subset of the actions in element-web
 export enum ElementWidgetActions {
   JoinCall = "io.element.join",
+  ConnectionState = "io.letro.connection_state",
   HangupCall = "im.vector.hangup",
   Close = "io.element.close",
   // This can be sent as from or to widget

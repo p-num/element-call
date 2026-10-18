@@ -5,6 +5,7 @@ SPDX-License-IdFentifier: AGPL-3.0-only OR LicenseRef-Element-Commercial
 Please see LICENSE in the repository root for full details.
 */
 
+import { observeHostConnection } from "../HostConnection";
 import {
   type Participant,
   ParticipantEvent,
@@ -610,6 +611,11 @@ export const createLocalMembership$ = ({
    */
   const matrixAndLivekitConnected$ = scope.behavior(
     connectionDisconnectReason$.pipe(map((reason) => reason === null)),
+  );
+
+  observeHostConnection(
+    matrixAndLivekitConnected$.pipe(scope.bind()),
+    hostBridge.notifyConnectionState,
   );
 
   /**
