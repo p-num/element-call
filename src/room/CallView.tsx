@@ -421,18 +421,8 @@ const LoadedCallView: FC<LoadedProps> = ({
         window.setTimeout(resolve, 10);
       });
 
-      void Promise.all([
-        audioPromise,
-        posthogRequest,
-        waitForHostHangup(rtcSession),
-      ])
-        .catch((e) =>
-          logger.error(
-            "Failed to play leave audio and/or send PostHog leave event",
-            e,
-          ),
-        )
-        .then(async () => {
+      void waitForHostHangup(rtcSession, [audioPromise, posthogRequest]).then(
+        async () => {
           if (
             !isPasswordlessUser &&
             !confineToRoom &&
@@ -455,7 +445,8 @@ const LoadedCallView: FC<LoadedProps> = ({
               logger.error("Failed to ask the host to close Element Call", e);
             }
           }
-        });
+        },
+      );
     },
     [
       setJoined,

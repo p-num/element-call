@@ -41,9 +41,16 @@ export function handleHostHangup(
     .catch((error) => logger.error("Failed to acknowledge call leave", error));
 }
 
-/** Keep the host connection alive until the requested leave result has been returned. */
-export async function waitForHostHangup(session: Session): Promise<void> {
+/** Cleanup failures must not let the host dispose of us before the requested leave reply. */
+export async function waitForHostHangup(
+  session: Session,
+  cleanup: readonly (Promise<unknown> | undefined)[] = [],
+): Promise<void> {
   const departure = departures.get(session);
-  await departure?.response;
+  const results = await Promise.allSettled([...cleanup, departure?.response]);
+  for (const result of results) {
+    if (result.status === "rejected")
+      logger.error("Call cleanup failed", result.reason);
+  }
   if (departures.get(session) === departure) departures.delete(session);
 }

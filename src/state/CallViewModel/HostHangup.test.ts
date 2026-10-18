@@ -10,6 +10,26 @@ import { describe, expect, it, vi } from "vitest";
 import { handleHostHangup, waitForHostHangup } from "./HostHangup";
 
 describe("host-requested leave acknowledgement", () => {
+  it("still waits for leave when another cleanup operation fails", async () => {
+    const leave = Promise.withResolvers<boolean>();
+    const session = {
+      leaveRoomSession: vi.fn().mockReturnValue(leave.promise),
+    };
+    const reply = vi.fn();
+    handleHostHangup({ data: { wait_for_leave: true }, reply }, session);
+    let canClose = false;
+    const closing = waitForHostHangup(session, [
+      Promise.reject(new Error("audio failed")),
+    ]).then(() => {
+      canClose = true;
+    });
+    await Promise.resolve();
+    expect(canClose).toBe(false);
+    leave.resolve(true);
+    await closing;
+    expect(reply).toHaveBeenCalledExactlyOnceWith({ left: true });
+    expect(canClose).toBe(true);
+  });
   it("keeps the transport open and does not acknowledge before leave completes", async () => {
     const leave = Promise.withResolvers<boolean>();
     const session = {
