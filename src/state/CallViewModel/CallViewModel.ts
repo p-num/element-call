@@ -91,6 +91,7 @@ import { type MuteStates } from "../MuteStates";
 import { HeaderStyle, type UrlParams } from "../../UrlParams";
 import { type ProcessorState } from "../../livekit/TrackProcessorContext";
 import { type HostBridge, nullHostBridge } from "../../HostBridge";
+import { handleHostHangup } from "./HostHangup";
 import {
   layoutShallowEquals,
   type Alignment,
@@ -969,7 +970,7 @@ export function createCallViewModel$(
 
   const hostHangup$ = hostBridge.hangUp$.pipe(
     tap((request) => {
-      request.reply();
+      handleHostHangup(request, matrixRTCSession);
     }),
   );
 

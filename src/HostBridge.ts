@@ -37,6 +37,9 @@ export type DeviceMuteRequest = {
   video_enabled?: boolean;
 };
 
+export type HangupRequest = { wait_for_leave?: boolean };
+export type HangupReply = { left: boolean };
+
 /**
  * Something the host has asked of Element Call, which it is expected to
  * acknowledge.
@@ -92,7 +95,7 @@ export interface HostBridge {
   /** The host wants a preloaded Element Call to join the call now. */
   join$: Observable<HostRequest<JoinCallData>>;
   /** The host wants Element Call to leave the call. */
-  hangUp$: Observable<HostRequest<Record<string, never>>>;
+  hangUp$: Observable<HostRequest<HangupRequest, HangupReply | void>>;
   /** The host wants to change, or read back, the device mute state. */
   deviceMute$: Observable<HostRequest<DeviceMuteRequest, DeviceMuteState>>;
 

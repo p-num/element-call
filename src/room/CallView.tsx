@@ -70,6 +70,7 @@ import { useAppBarTitle } from "../AppBar.tsx";
 import { useBehavior } from "../useBehavior.ts";
 import { useRootElement } from "../RootElementContext.ts";
 import { useHostBridge } from "../HostBridge.ts";
+import { waitForHostHangup } from "../state/CallViewModel/HostHangup";
 import { useMuteStates } from "../state/useMuteStates.ts";
 import { useLeaveToHome } from "../LeaveToHomeContext.ts";
 
@@ -420,7 +421,11 @@ const LoadedCallView: FC<LoadedProps> = ({
         window.setTimeout(resolve, 10);
       });
 
-      void Promise.all([audioPromise, posthogRequest])
+      void Promise.all([
+        audioPromise,
+        posthogRequest,
+        waitForHostHangup(rtcSession),
+      ])
         .catch((e) =>
           logger.error(
             "Failed to play leave audio and/or send PostHog leave event",
