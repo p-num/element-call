@@ -5,12 +5,15 @@ SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Element-Commercial
 Please see LICENSE in the repository root for full details.
 */
 
-import type { MatrixRTCSession } from "matrix-js-sdk/lib/matrixrtc";
+import {
+  MatrixRTCSessionEvent,
+  type MatrixRTCSession,
+} from "matrix-js-sdk/lib/matrixrtc";
 import { logger } from "matrix-js-sdk/lib/logger";
 
 import type { HangupReply, HangupRequest, HostRequest } from "../../HostBridge";
 
-type Session = Pick<MatrixRTCSession, "leaveRoomSession">;
+type Session = Pick<MatrixRTCSession, "leaveRoomSession" | "on" | "off">;
 interface Departure {
   result: Promise<boolean>;
   response: Promise<void>;
@@ -31,7 +34,7 @@ export function handleHostHangup(
   let departure = departures.get(session);
   if (!departure) {
     departure = {
-      result: session.leaveRoomSession(10_000).catch(() => false),
+      result: leaveWithConfirmation(session),
       response: Promise.resolve(),
     };
     departures.set(session, departure);
@@ -53,4 +56,28 @@ export async function waitForHostHangup(
       logger.error("Call cleanup failed", result.reason);
   }
   if (departures.get(session) === departure) departures.delete(session);
+}
+
+/** The SDK Boolean also resolves on worker failure, so observe its error before requesting leave. */
+async function leaveWithConfirmation(session: Session): Promise<boolean> {
+  let failed = false;
+  const onError = (): void => {
+    failed = true;
+  };
+  session.on(MatrixRTCSessionEvent.MembershipManagerError, onError);
+  let deadline: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const left = await Promise.race([
+      session.leaveRoomSession(10_000),
+      new Promise<false>((resolve) => {
+        deadline = setTimeout(() => resolve(false), 10_000);
+      }),
+    ]);
+    return left && !failed;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(deadline);
+    session.off(MatrixRTCSessionEvent.MembershipManagerError, onError);
+  }
 }
