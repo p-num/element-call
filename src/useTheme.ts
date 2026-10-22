@@ -7,6 +7,7 @@ Please see LICENSE in the repository root for full details.
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
+import { getCallBrand } from "./branding/brand";
 import { useUrlParams } from "./UrlParams";
 import { useRootElement } from "./RootElementContext";
 import { platform } from "./Platform";
@@ -15,7 +16,7 @@ import { useHostBridge } from "./HostBridge";
 export const useTheme = (): void => {
   const rootElement = useRootElement();
   const hostBridge = useHostBridge();
-  const { theme } = useUrlParams();
+  const { theme, brand } = useUrlParams();
   const [requestedTheme, setRequestedTheme] = useState(theme);
   const previousTheme = useRef<string | null>(rootElement.classList.item(0));
 
@@ -38,6 +39,7 @@ export const useTheme = (): void => {
   }, [rootElement]);
 
   useLayoutEffect(() => {
+    rootElement.dataset.callBrand = brand ?? getCallBrand();
     // If no theme has been explicitly requested we default to dark
     const theme = requestedTheme?.includes("light") ? "light" : "dark";
     const themeHighContrast = requestedTheme?.includes("high-contrast")
@@ -55,5 +57,5 @@ export const useTheme = (): void => {
       previousTheme.current = themeString;
     }
     rootElement.classList.remove("no-theme");
-  }, [previousTheme, requestedTheme, rootElement]);
+  }, [brand, previousTheme, requestedTheme, rootElement]);
 };

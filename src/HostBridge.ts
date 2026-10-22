@@ -37,7 +37,7 @@ export type DeviceMuteRequest = {
   video_enabled?: boolean;
 };
 
-export type HangupRequest = { wait_for_leave?: boolean };
+export type HangupRequest = { wait_for_leave?: boolean } | null | undefined;
 export type HangupReply = { left: boolean };
 
 /**
@@ -180,7 +180,7 @@ export function createWidgetHostBridge(widget: WidgetHelpers): HostBridge {
     await widget.api.transport.send(action, data);
   };
 
-  // One sequence for this widget, including retries that replace LocalMember.
+  // One sequence for this widget, including replacement participations.
   let connectionSequence = 0;
   return {
     setAlwaysOnScreen: async (alwaysOnScreen) => {

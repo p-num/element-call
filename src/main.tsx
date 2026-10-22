@@ -16,6 +16,13 @@ import { createRoot } from "react-dom/client";
 import "./index.css";
 import { logger } from "matrix-js-sdk/lib/logger";
 
+import {
+  initializeCallBrand,
+  getCallBrand,
+  getProductName,
+} from "./branding/brand";
+import letroIcon from "./branding/letro-icon.png";
+import { Config } from "./config/Config";
 import { App } from "./App";
 import { init as initRageshake } from "./settings/rageshake";
 import { Initializer } from "./initializer";
@@ -49,7 +56,19 @@ if (fatalError !== null) {
 }
 
 Initializer.initBeforeReact()
-  .then((widget) => {
+  .then(async (widget) => {
+    await Config.init();
+    initializeCallBrand(Config.get().brand);
+    document.title = getProductName();
+    if (getCallBrand() === "letro") {
+      const icon =
+        document.querySelector<HTMLLinkElement>('link[rel="icon"]') ??
+        document.createElement("link");
+      icon.rel = "icon";
+      icon.href = letroIcon;
+      icon.type = "image/png";
+      if (!icon.isConnected) document.head.append(icon);
+    }
     const { controlledAudioDevices, callIntent } = getUrlParams();
     root.render(
       <StrictMode>

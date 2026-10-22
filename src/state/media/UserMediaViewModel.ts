@@ -7,32 +7,30 @@ Please see LICENSE in the repository root for full details.
 */
 
 import {
+  type Behavior,
+  type MediaStreamStats,
+  type ObservableScope,
+  trackBySource$,
+} from "@element-hq/matrixrtc-sdk";
+import {
   BehaviorSubject,
   combineLatest,
   map,
-  type Observable,
   of,
   Subject,
   switchMap,
 } from "rxjs";
-import {
-  observeParticipantEvents,
-  observeParticipantMedia,
-} from "@livekit/components-core";
-import { ParticipantEvent, Track } from "livekit-client";
 
 import { type ReactionOption } from "../../reactions";
-import { type Behavior } from "../Behavior";
 import { type LocalUserMediaViewModel } from "./LocalUserMediaViewModel";
 import {
   createMemberMedia,
   type MemberMediaInputs,
   type BaseMemberMediaViewModel,
+  statsIntervalMs,
 } from "./MemberMediaViewModel";
 import { type RemoteUserMediaViewModel } from "./RemoteUserMediaViewModel";
-import { type ObservableScope } from "../ObservableScope";
 import { showConnectionStats } from "../../settings/settings";
-import { observeRtpStreamStats$ } from "./observeRtpStreamStats";
 
 /**
  * A participant's user media (i.e. their microphone and camera feed).
@@ -49,17 +47,13 @@ export interface BaseUserMediaViewModel extends BaseMemberMediaViewModel {
   videoOrientation$: Behavior<"landscape" | "portrait">;
   toggleCropVideo: () => void;
   /**
-   * The expected identity of the LiveKit participant. Exposed for debugging.
+   * The expected identity of the member on the media backend. Exposed for debugging.
    */
   rtcBackendIdentity: string;
   handRaised$: Behavior<Date | null>;
   reaction$: Behavior<ReactionOption | null>;
-  audioStreamStats$: Observable<
-    RTCInboundRtpStreamStats | RTCOutboundRtpStreamStats | undefined
-  >;
-  videoStreamStats$: Observable<
-    RTCInboundRtpStreamStats | RTCOutboundRtpStreamStats | undefined
-  >;
+  audioStreamStats$: Behavior<MediaStreamStats>;
+  videoStreamStats$: Behavior<MediaStreamStats>;
   /**
    * Set the aspect ratio of the video track to determine the orientation.
    */
@@ -73,7 +67,6 @@ export interface BaseUserMediaInputs extends Omit<
   rtcBackendIdentity: string;
   handRaised$: Behavior<Date | null>;
   reaction$: Behavior<ReactionOption | null>;
-  statsType: "inbound-rtp" | "outbound-rtp";
 }
 
 export function createBaseUserMedia(
@@ -82,44 +75,58 @@ export function createBaseUserMedia(
     rtcBackendIdentity,
     handRaised$,
     reaction$,
-    statsType,
     ...inputs
   }: BaseUserMediaInputs,
 ): BaseUserMediaViewModel {
-  const { participant$ } = inputs;
-  const media$ = scope.behavior(
-    participant$.pipe(
-      switchMap((p) => (p && observeParticipantMedia(p)) ?? of(undefined)),
-    ),
-  );
+  const { tracks$ } = inputs.member;
   const toggleCropVideo$ = new Subject<void>();
   const videoAspectRatio$ = new BehaviorSubject(NaN);
+  const enabled$ = (
+    scope: ObservableScope,
+    source: "microphone" | "camera",
+  ): Behavior<boolean> =>
+    scope.behavior(
+      trackBySource$(scope, tracks$, source).pipe(
+        switchMap((track) =>
+          track === undefined
+            ? of(false)
+            : track.muted$.pipe(map((muted) => !muted)),
+        ),
+      ),
+    );
+  // The statistics are only polled while the setting asks for them
+  const streamStats$ = (
+    scope: ObservableScope,
+    source: "microphone" | "camera",
+  ): Behavior<MediaStreamStats> =>
+    scope.behavior(
+      combineLatest([
+        trackBySource$(scope, tracks$, source),
+        showConnectionStats.value$,
+      ]).pipe(
+        switchMap(([track, show]) =>
+          track !== undefined && show
+            ? track.stats$(statsIntervalMs)
+            : of(undefined),
+        ),
+      ),
+    );
 
   return {
     ...createMemberMedia(scope, {
       ...inputs,
-      audioSource: Track.Source.Microphone,
-      videoSource: Track.Source.Camera,
+      audioSource: "microphone",
+      videoSource: "camera",
     }),
     type: "user",
+    // What a call calls speaking is the microphone carrying sound
     speaking$: scope.behavior(
-      participant$.pipe(
-        switchMap((p) =>
-          p
-            ? observeParticipantEvents(
-                p,
-                ParticipantEvent.IsSpeakingChanged,
-              ).pipe(map((p) => p.isSpeaking))
-            : of(false),
-        ),
+      trackBySource$(scope, tracks$, "microphone").pipe(
+        switchMap((track) => track?.isActive$ ?? of(false)),
       ),
     ),
-    audioEnabled$: scope.behavior(
-      media$.pipe(map((m) => m?.microphoneTrack?.isMuted === false)),
-    ),
-    videoEnabled$: scope.behavior(
-      media$.pipe(map((m) => m?.cameraTrack?.isMuted === false)),
-    ),
+    audioEnabled$: enabled$(scope, "microphone"),
+    videoEnabled$: enabled$(scope, "camera"),
     videoOrientation$: scope.behavior(
       videoAspectRatio$.pipe(
         map((aspect) => (aspect > 1 ? "landscape" : "portrait")),
@@ -130,25 +137,8 @@ export function createBaseUserMedia(
     rtcBackendIdentity,
     handRaised$,
     reaction$,
-    audioStreamStats$: combineLatest([
-      participant$,
-      showConnectionStats.value$,
-    ]).pipe(
-      switchMap(([p, showConnectionStats]) => {
-        //
-        if (!p || !showConnectionStats) return of(undefined);
-        return observeRtpStreamStats$(p, Track.Source.Microphone, statsType);
-      }),
-    ),
-    videoStreamStats$: combineLatest([
-      participant$,
-      showConnectionStats.value$,
-    ]).pipe(
-      switchMap(([p, showConnectionStats]) => {
-        if (!p || !showConnectionStats) return of(undefined);
-        return observeRtpStreamStats$(p, Track.Source.Camera, statsType);
-      }),
-    ),
+    audioStreamStats$: streamStats$(scope, "microphone"),
+    videoStreamStats$: streamStats$(scope, "camera"),
     setVideoAspectRatio: (ratio) => videoAspectRatio$.next(ratio),
   };
 }

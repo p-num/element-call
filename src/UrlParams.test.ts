@@ -30,6 +30,21 @@ const HOMESERVER = "localhost";
 mockConfig();
 
 describe("UrlParams", () => {
+  it.each(["light", "dark", "light-high-contrast", "dark-high-contrast"])(
+    "selects brand independently of %s",
+    (theme) => {
+      expect(
+        computeUrlParams("", `#?brand=letro&theme=${theme}`),
+      ).toMatchObject({ brand: "letro", theme });
+    },
+  );
+  it("preserves Element as the default and rejects CSS URLs", () => {
+    expect(computeUrlParams("", "").brand).toBeNull();
+    expect(
+      computeUrlParams("", "#?brand=https://example.com/theme.css").brand,
+    ).toBe("element");
+  });
+
   describe("handles URL with /room/", () => {
     it("and nothing else", () => {
       expect(
@@ -230,7 +245,6 @@ describe("UrlParams", () => {
       showControls: true,
       hideScreensharing: false,
       allowIceFallback: false,
-      perParticipantE2EE: false,
       controlledAudioDevices: false,
       skipLobby: false,
       returnToLobby: false,
@@ -243,7 +257,6 @@ describe("UrlParams", () => {
       showControls: true,
       hideScreensharing: false,
       allowIceFallback: true,
-      perParticipantE2EE: true,
       controlledAudioDevices: platform === "desktop" ? false : true,
       skipLobby: true,
       returnToLobby: false,
@@ -256,7 +269,6 @@ describe("UrlParams", () => {
       showControls: true,
       hideScreensharing: false,
       allowIceFallback: true,
-      perParticipantE2EE: true,
       controlledAudioDevices: platform === "desktop" ? false : true,
       skipLobby: false,
       returnToLobby: false,
@@ -499,7 +511,6 @@ describe("UrlParams", () => {
         // A host owns navigation, so Element Call must not offer a way out of
         // the room
         confineToRoom: true,
-        perParticipantE2EE: true,
         // The lobby first, so that the user picks their devices rather than
         // being thrown into the call by the act of being rendered
         skipLobby: false,
@@ -512,7 +523,6 @@ describe("UrlParams", () => {
       expect(configurationForIntent(UserIntent.Unknown)).toMatchObject({
         confineToRoom: false,
         header: HeaderStyle.Standard,
-        perParticipantE2EE: false,
       });
     });
   });

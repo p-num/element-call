@@ -43,7 +43,10 @@ Please see LICENSE in the repository root for full details.
   inset-inline: 0;
 }
 
-.footer.overlay:has(:focus-visible) {
+/* Keep the footer while it is in use: focus inside it, or a menu opened from
+   it. The menu is portalled out, so the trigger's aria-expanded tracks it. */
+.footer.overlay:has(:focus-visible),
+.footer.overlay:has([aria-expanded="true"]) {
   opacity: 1;
   pointer-events: initial;
 }
@@ -130,6 +133,18 @@ Once we exceed 500 we hide everything except the buttons.
 }
 
 @container element-call (max-width: 370px) {
+  .footer {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "buttons";
+    padding-left: calc(env(safe-area-inset-left) + var(--cpd-space-1x));
+    padding-right: calc(env(safe-area-inset-right) + var(--cpd-space-1x));
+  }
+  .buttons {
+    max-inline-size: 100%;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: var(--cpd-space-1x);
+  }
   .shareScreen {
     display: none;
   }

@@ -70,7 +70,6 @@ import { useAppBarTitle } from "../AppBar.tsx";
 import { useBehavior } from "../useBehavior.ts";
 import { useRootElement } from "../RootElementContext.ts";
 import { useHostBridge } from "../HostBridge.ts";
-import { waitForHostHangup } from "../state/CallViewModel/HostHangup";
 import { useMuteStates } from "../state/useMuteStates.ts";
 import { useLeaveToHome } from "../LeaveToHomeContext.ts";
 
@@ -243,12 +242,7 @@ const LoadedCallView: FC<LoadedProps> = ({
   const { displayName, avatarUrl } = useProfile(client);
   const roomName = useRoomName(room);
   const roomAvatar = useRoomAvatar(room);
-  const {
-    perParticipantE2EE,
-    returnToLobby,
-    password: passwordFromUrl,
-    header,
-  } = useUrlParams();
+  const { returnToLobby, password: passwordFromUrl, header } = useUrlParams();
   const e2eeSystem = useRoomEncryptionSystem(room.roomId);
 
   // Save the password once we start the groupCallView
@@ -366,7 +360,6 @@ const LoadedCallView: FC<LoadedProps> = ({
     rtcSession,
     preload,
     skipLobby,
-    perParticipantE2EE,
     mediaDevices,
     latestMuteStates,
     setJoined,
@@ -421,8 +414,14 @@ const LoadedCallView: FC<LoadedProps> = ({
         window.setTimeout(resolve, 10);
       });
 
-      void waitForHostHangup(rtcSession, [audioPromise, posthogRequest]).then(
-        async () => {
+      void Promise.all([audioPromise, posthogRequest])
+        .catch((e) =>
+          logger.error(
+            "Failed to play leave audio and/or send PostHog leave event",
+            e,
+          ),
+        )
+        .then(async () => {
           if (
             !isPasswordlessUser &&
             !confineToRoom &&
@@ -445,8 +444,7 @@ const LoadedCallView: FC<LoadedProps> = ({
               logger.error("Failed to ask the host to close Element Call", e);
             }
           }
-        },
-      );
+        });
     },
     [
       setJoined,

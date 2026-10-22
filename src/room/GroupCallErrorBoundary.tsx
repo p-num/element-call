@@ -5,6 +5,9 @@ SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Element-Commercial
 Please see LICENSE in the repository root for full details.
 */
 
+import { getProductName } from "../branding/brand";
+import { useBrand } from "../branding/useBrand";
+
 import { ErrorBoundary, type FallbackRender } from "@sentry/react";
 import {
   type ComponentType,
@@ -52,6 +55,7 @@ const ErrorPage: FC<ErrorPageProps> = ({
   error,
   recoveryActionHandler,
 }: ErrorPageProps): ReactElement => {
+  const brand = useBrand();
   const { t } = useTranslation();
   logger.error("Error boundary caught:", error);
   let icon: ComponentType<SVGAttributes<SVGElement>>;
@@ -92,7 +96,10 @@ const ErrorPage: FC<ErrorPageProps> = ({
             <Trans
               // @ts-expect-error - Dynamic i18nKey from error object
               i18nKey={error.localisedMessageKey}
-              values={error.localisedMessageValues}
+              values={{
+                ...error.localisedMessageValues,
+                brand: getProductName(brand),
+              }}
               components={[
                 <a
                   href={String(error.localisedMessageValues?.linkUrl || "#")}

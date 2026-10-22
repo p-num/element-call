@@ -20,8 +20,6 @@ import {
 import useMeasure from "react-use-measure";
 import { type MatrixRTCSession } from "matrix-js-sdk/lib/matrixrtc";
 import classNames from "classnames";
-import { map } from "rxjs";
-import { useObservable } from "observable-hooks";
 import { logger as rootLogger } from "matrix-js-sdk/lib/logger";
 import { useTranslation } from "react-i18next";
 
@@ -44,11 +42,16 @@ import { InviteButton } from "../button/InviteButton";
 import {
   type CallViewModel,
   callViewModelOptionsFromParams,
+  type CaptureSettings,
   createCallViewModel$,
+  initialPublishRequests,
 } from "../state/CallViewModel/CallViewModel.ts";
 import { Grid, type TileProps } from "../grid/Grid";
 import { SpotlightTile } from "../tile/SpotlightTile";
-import { type EncryptionSystem } from "../e2ee/sharedKeyManagement";
+import {
+  type EncryptionSystem,
+  type MatrixRTCMode,
+} from "@element-hq/matrixrtc-sdk";
 import { E2eeType } from "../e2ee/e2eeType";
 import { makeGridLayout } from "../grid/GridLayout";
 import { type CallLayoutOutputs } from "../grid/CallLayout";
@@ -65,9 +68,35 @@ import {
 import { ReactionsAudioRenderer } from "./ReactionAudioRenderer";
 import { ReactionsOverlay } from "./ReactionsOverlay";
 import { CallEventAudioRenderer } from "./CallEventAudioRenderer";
-import { matrixRTCMode as matrixRTCModeSetting } from "../settings/settings";
+import {
+  createRTCSlot,
+  type RTCParticipationOptions,
+  type RTCSlotOptions,
+  constant,
+} from "@element-hq/matrixrtc-sdk";
+import { map } from "rxjs";
+import {
+  advancedCamera,
+  advancedScreenShare,
+  autoGainControlSetting,
+  cameraBitrate,
+  cameraCodec,
+  cameraFramerate,
+  cameraResolution,
+  customTransport,
+  echoCancellationSetting,
+  matrixRTCMode as matrixRTCModeSetting,
+  noiseSuppressionSetting,
+  parseResolution,
+  screenShareBitrate,
+  screenShareCodec,
+  screenShareFramerate,
+  screenShareResolution,
+} from "../settings/settings";
+import { Config } from "../config/Config";
+import { createSentCallNotification$ } from "../state/CallViewModel/CallNotificationLifecycle.ts";
 import { ReactionsReader } from "../reactions/ReactionsReader";
-import { LivekitRoomAudioRenderer } from "../livekit/MatrixAudioRenderer.tsx";
+import { MemberAudioRenderer } from "../tracks/MemberAudioRenderer.tsx";
 import { muteAllAudio$ } from "../state/MuteAllAudioModel.ts";
 import { useMediaDevices } from "../MediaDevicesContext.ts";
 import { EarpieceOverlay } from "./EarpieceOverlay.tsx";
@@ -77,10 +106,10 @@ import {
   useAppBarSubtitle,
 } from "../AppBar.tsx";
 import { useBehavior } from "../useBehavior.ts";
-import { constant } from "../state/Behavior.ts";
+import { useValueBehavior } from "../useValueBehavior.ts";
 import { Toast } from "../Toast.tsx";
 import overlayStyles from "../Overlay.module.css";
-import { useTrackProcessorObservable$ } from "../livekit/TrackProcessorContext.tsx";
+import { useTrackProcessorState$ } from "../tracks/TrackProcessorContext.tsx";
 import { type Layout } from "../state/layout-types.ts";
 import { ObservableScope } from "../state/ObservableScope.ts";
 import { CallFooter, type FooterSnapshot } from "../components/CallFooter.tsx";
@@ -101,7 +130,7 @@ declare module "react" {
 
 export interface ActiveCallProps extends Omit<
   InCallViewProps,
-  "vm" | "livekitRoom" | "connState" | "footerVm" | "developerSettingsVm"
+  "vm" | "footerVm" | "developerSettingsVm"
 > {
   e2eeSystem: EncryptionSystem;
   // TODO refactor those reasons into an enum
@@ -121,7 +150,7 @@ export const ActiveCall: FC<ActiveCallProps> = (props) => {
   const urlParams = useUrlParams();
   const hostBridge = useHostBridge();
   const mediaDevices = useMediaDevices();
-  const trackProcessorState$ = useTrackProcessorObservable$();
+  const trackProcessorState$ = useTrackProcessorState$();
   // The element we have to draw the call in: the page, or the container a host
   // gave us. Its size, not the window's, decides how the call is laid out.
   const rootElement = useRootElement();
@@ -132,29 +161,43 @@ export const ActiveCall: FC<ActiveCallProps> = (props) => {
     const { autoLeaveWhenOthersLeft, waitForCallPickup, sendNotificationType } =
       urlParams;
 
+    const capture = captureSettings();
+    const slot = createRTCSlot(
+      scope,
+      props.client,
+      props.matrixRoom,
+      rtcSlotOptions(props.e2eeSystem),
+    );
+    const rtcParticipation = slot.join({
+      ...rtcParticipationOptions(urlParams),
+      publish: initialPublishRequests(props.muteStates, mediaDevices, capture),
+    });
+
     const vm = createCallViewModel$(
       scope,
-      props.rtcSession,
+      rtcParticipation,
       props.matrixRoom,
       mediaDevices,
       props.muteStates,
       {
         ...callViewModelOptionsFromParams(urlParams),
         encryptionSystem: props.e2eeSystem,
+        capture,
+        videoProcessor$: scope.behavior(
+          trackProcessorState$.pipe(map((state) => state.processor)),
+        ),
         hostBridge,
         autoLeaveWhenOthersLeft,
         waitForCallPickup: waitForCallPickup && sendNotificationType === "ring",
-        // We merely sample the current mode here, so the user would need to
-        // manually rejoin to switch to a different one.
-        matrixRTCMode: matrixRTCModeSetting.value$.value,
+        sentCallNotification$: createSentCallNotification$(
+          scope,
+          props.rtcSession,
+        ),
         windowSize$: scope.behavior(observeElementSize$(rootElement)),
       },
       reactionsReader.raisedHands$,
       reactionsReader.reactions$,
-      scope.behavior(trackProcessorState$),
     );
-    // TODO move this somewhere else once we use the callViewModel in the lobby as well!
-    vm.join();
     setVm(vm);
 
     vm.leave$.pipe(scope.bind()).subscribe(props.onLeft);
@@ -251,16 +294,6 @@ export const InCallView: FC<InCallViewProps> = ({
   const { sendReaction, toggleRaisedHand } = useReactionsSender();
 
   useWakeLock();
-  // TODO-MULTI-SFU This is unused now??
-  // const connectionState = useObservableEagerState(vm.livekitConnectionState$);
-
-  // annoyingly we don't get the disconnection reason this way,
-  // only by listening for the emitted event
-  // This needs to be done differential. with the vm connection state we start with Disconnected.
-  // TODO-MULTI-SFU decide how to handle this properly
-  // @BillCarsonFr
-  // if (connectionState === ConnectionState.Disconnected)
-  //   throw new ConnectionLostError();
 
   const containerRef1 = useRef<HTMLDivElement | null>(null);
   const [containerRef2, bounds] = useMeasure();
@@ -297,7 +330,7 @@ export const InCallView: FC<InCallViewProps> = ({
   );
 
   const ringingVm = useBehavior(vm.ringingVm$);
-  const audioParticipants = useBehavior(vm.livekitRoomItems$);
+  const remoteMembers = useBehavior(vm.remoteMembers$);
   const participantCount = useBehavior(vm.participantCount$);
   const reconnecting = useBehavior(vm.reconnecting$);
   const screenShareError = useBehavior(vm.screenShareError$);
@@ -374,10 +407,7 @@ export const InCallView: FC<InCallViewProps> = ({
       edgeToEdge,
     ],
   );
-  const gridBoundsObservable$ = useObservable(
-    (inputs$) => inputs$.pipe(map(([gridBounds]) => gridBounds)),
-    [gridBounds],
-  );
+  const gridBounds$ = useValueBehavior(gridBounds);
 
   useAppBarHidden(!showHeader);
   useAppBarSubtitle(
@@ -538,7 +568,7 @@ export const InCallView: FC<InCallViewProps> = ({
   );
 
   const layouts = useMemo(() => {
-    const inputs = { minBounds$: gridBoundsObservable$ };
+    const inputs = { minBounds$: gridBounds$ };
     return {
       grid: makeGridLayout(inputs),
       "spotlight-landscape": makeSpotlightLandscapeLayout(inputs),
@@ -547,7 +577,7 @@ export const InCallView: FC<InCallViewProps> = ({
       "one-on-one-desktop": makeOneOnOneDesktopLayout(inputs),
       "one-on-one-mobile": makeOneOnOneMobileLayout(inputs),
     };
-  }, [gridBoundsObservable$]);
+  }, [gridBounds$]);
 
   const showFooter = useBehavior(footerVm.showFooter$);
   const renderContent = (): JSX.Element => {
@@ -650,7 +680,11 @@ export const InCallView: FC<InCallViewProps> = ({
   const footer = footerVm !== null && (
     <CallFooter className={styles.footer} ref={footerRef} vm={footerVm} />
   );
-  const allConnections = useBehavior(vm.allConnections$);
+  const connectedTransports = useBehavior(vm.connectedTransports$);
+  const localMember = useBehavior(vm.localMember$);
+  const localTransport = useBehavior(
+    localMember?.transport$ ?? constant(undefined),
+  );
 
   return (
     // The pointer handler here exists to control the visibility of the footer,
@@ -669,15 +703,7 @@ export const InCallView: FC<InCallViewProps> = ({
       onPointerOut={onPointerOut}
     >
       {header}
-      {audioParticipants.map(({ livekitRoom, url, participants }) => (
-        <LivekitRoomAudioRenderer
-          key={url}
-          url={url}
-          livekitRoom={livekitRoom}
-          validIdentities={participants}
-          muted={muteAllAudio}
-        />
-      ))}
+      <MemberAudioRenderer members={remoteMembers} muted={muteAllAudio} />
       {renderContent()}
       <CallEventAudioRenderer vm={vm} muted={muteAllAudio} />
       <ReactionsAudioRenderer vm={vm} muted={muteAllAudio} />
@@ -698,18 +724,109 @@ export const InCallView: FC<InCallViewProps> = ({
             tab={settingsTab}
             onTabChange={setSettingsTab}
             developerSettingsVm={developerSettingsVm}
-            livekitRooms={allConnections
-              .getConnections()
-              .map((connectionItem) => ({
-                room: connectionItem.livekitRoom,
-                livekitAlias: connectionItem.livekitAlias,
-                // TODO compute is local or tag it in the livekit room items already
-                isLocal: undefined,
-                url: connectionItem.transport.livekit_service_url,
-              }))}
+            transports={connectedTransports.map((transport) => ({
+              transport,
+              local: transport === localTransport,
+            }))}
           />
         </>
       )}
     </div>
   );
 };
+
+/**
+ * How the tracks are captured and encoded, from Element Call's settings and
+ * configuration. Shared with the legacy SDK bundle so that a widget built from
+ * it behaves like the app.
+ */
+export function captureSettings(): CaptureSettings {
+  const config = Config.get();
+  const cameraSettings = advancedCamera.getValue()
+    ? {
+        resolution: {
+          ...parseResolution(cameraResolution.getValue()),
+          frameRate: cameraFramerate.getValue(),
+        },
+        maxBitrate: cameraBitrate.getValue(),
+        maxFramerate: cameraFramerate.getValue(),
+        codec: cameraCodec.getValue(),
+      }
+    : undefined;
+  const screenConfig = config.media_quality?.screen_share;
+  const screenShareSettings = advancedScreenShare.getValue()
+    ? {
+        resolution: {
+          ...parseResolution(screenShareResolution.getValue()),
+          frameRate: screenShareFramerate.getValue(),
+        },
+        maxBitrate: screenShareBitrate.getValue(),
+        maxFramerate: screenShareFramerate.getValue(),
+        codec: screenShareCodec.getValue(),
+      }
+    : screenConfig?.max_resolution
+      ? {
+          resolution: {
+            width: Math.round((screenConfig.max_resolution * 16) / 9),
+            height: screenConfig.max_resolution,
+            frameRate: screenConfig.max_framerate ?? 30,
+          },
+        }
+      : undefined;
+  return {
+    audio: {
+      echoCancellation: echoCancellationSetting.getValue(),
+      noiseSuppression: noiseSuppressionSetting.getValue(),
+      autoGainControl: autoGainControlSetting.getValue(),
+    },
+    camera: cameraSettings,
+    screenShare: screenShareSettings,
+  };
+}
+
+/**
+ * What the client needs from Element Call's configuration, settings and URL:
+ * the SDK reads none of them itself. What to publish depends on the mute
+ * switches and the devices, so the caller adds that. Shared with the legacy
+ * SDK bundle so that a widget built from it behaves like the app.
+ */
+export function rtcSlotOptions(
+  encryptionSystem: EncryptionSystem,
+): RTCSlotOptions {
+  return {
+    encryptionSystem,
+    // matrix_rtc_mode in config.json overrides the user's Developer Settings
+    // choice. We merely sample the current mode here, so the user would need
+    // to manually rejoin to switch to a different one.
+    matrixRTCMode:
+      (Config.get().matrix_rtc_mode as MatrixRTCMode | undefined) ??
+      matrixRTCModeSetting.value$.value,
+  };
+}
+
+export function rtcParticipationOptions(
+  urlParams: ReturnType<typeof useUrlParams>,
+): Omit<RTCParticipationOptions, "publish"> {
+  const config = Config.get();
+  const session = config.matrix_rtc_session;
+  return {
+    sendNotificationType: urlParams.sendNotificationType,
+    applicationData: urlParams.callIntent
+      ? { "m.call.intent": urlParams.callIntent }
+      : undefined,
+    timings: {
+      syncDisconnectGracePeriodMs: config.sync_disconnect_grace_period_ms,
+      networkErrorRetryMs: session.network_error_retry_ms,
+      membershipEventExpiryMs: session.membership_event_expiry_ms,
+      keyRotationParticipantLimit: session.key_rotation_participant_limit,
+      delayedLeave: session.delayed_leave,
+      delegatedDelayedLeave: session.delegated_delayed_leave,
+    },
+    mediaQuality: config.media_quality,
+    transport: customTransport.value$.value ?? undefined,
+    fallbackTransport: config.livekit && {
+      type: "livekit",
+      livekit_service_url: config.livekit.livekit_service_url,
+    },
+  };
+}
