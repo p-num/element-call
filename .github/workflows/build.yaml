@@ -23,7 +23,7 @@ jobs:
       CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
   deploy_develop:
     # Deploy main branch to call.element.dev after build completes
-    if: github.ref == 'refs/heads/main'
+    if: github.repository == 'element-hq/element-call' && github.ref == 'refs/heads/main'
     needs: build_full_element_call
     runs-on: ubuntu-latest
     steps:
@@ -44,7 +44,7 @@ jobs:
             })
   docker_for_develop:
     # Build docker and publish docker for main branch after build completes
-    if: github.ref == 'refs/heads/main'
+    if: github.repository == 'element-hq/element-call' && github.ref == 'refs/heads/main'
     needs: build_full_element_call
     permissions:
       contents: write
