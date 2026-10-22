@@ -26,11 +26,10 @@ import {
   VolumeOnSolidIcon,
 } from "@vector-im/compound-design-tokens/assets/web/icons";
 import { animated } from "@react-spring/web";
-import { type Observable, map } from "rxjs";
-import { useObservableRef } from "observable-hooks";
+import { BehaviorSubject, type Observable, map } from "rxjs";
 import { useTranslation } from "react-i18next";
 import classNames from "classnames";
-import { type TrackReferenceOrPlaceholder } from "@livekit/components-core";
+import { type VideoMediaTrack } from "@element-hq/matrixrtc-sdk";
 import { Menu, MenuItem, Text } from "@vector-im/compound-web";
 
 import FullScreenMaximiseIcon from "../icons/FullScreenMaximise.svg?react";
@@ -55,6 +54,7 @@ import { platform } from "../Platform";
 import { type RingingMediaViewModel } from "../state/media/RingingMediaViewModel";
 import { RingingStatus } from "./RingingStatus";
 import { useRootElement } from "../RootElementContext";
+import { type Transport } from "matrix-js-sdk/lib/matrixrtc";
 
 interface SpotlightItemBaseProps {
   ref?: Ref<HTMLDivElement>;
@@ -73,9 +73,9 @@ interface SpotlightItemBaseProps {
 }
 
 interface SpotlightMemberMediaItemBaseProps extends SpotlightItemBaseProps {
-  video: TrackReferenceOrPlaceholder | undefined;
+  video: VideoMediaTrack | undefined;
   unencryptedWarning: boolean;
-  focusUrl: string | undefined;
+  transport: Transport | undefined;
 }
 
 interface SpotlightUserMediaItemBaseProps extends SpotlightMemberMediaItemBaseProps {
@@ -178,13 +178,13 @@ const SpotlightMemberMediaItem: FC<SpotlightMemberMediaItemProps> = ({
 }) => {
   const video = useBehavior(vm.video$);
   const unencryptedWarning = useBehavior(vm.unencryptedWarning$);
-  const focusUrl = useBehavior(vm.focusUrl$);
+  const transport = useBehavior(vm.transport$);
 
   const baseProps: SpotlightMemberMediaItemBaseProps &
     RefAttributes<HTMLDivElement> = {
     video: video ?? undefined,
     unencryptedWarning,
-    focusUrl,
+    transport,
     ...props,
   };
 
@@ -416,7 +416,13 @@ export const SpotlightTile: FC<Props> = ({
 }) => {
   const { t } = useTranslation();
   const rootElement = useRootElement();
-  const [ourRef, root$] = useObservableRef<HTMLDivElement | null>(null);
+  const root$ = useInitial(
+    () => new BehaviorSubject<HTMLDivElement | null>(null),
+  );
+  const ourRef = useCallback(
+    (root: HTMLDivElement | null) => root$.next(root),
+    [root$],
+  );
   const ref = useMergedRefs(ourRef, theirRef);
   const maximised = useBehavior(vm.maximised$);
   const background = useBehavior(vm.background$);

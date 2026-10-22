@@ -7,9 +7,25 @@ Please see LICENSE in the repository root for full details.
 
 /* Styles for Element Call as a page of its own. The parts that apply wherever
 Element Call is shown live in base.css; these are about owning the document,
-and are not loaded when a host embeds Element Call as a component. */
+and are not loaded when a host embeds Element Call as a component.
+
+That includes Compound: the page brings the design tokens, the component styles
+and their fonts, where a host embedding the component supplies its own. The
+`compound` layers are ordered by base.css. */
 
 @import url("./base.css");
+
+@import url("./branding/generated.css");
+
+@import url("@fontsource/inter/400.css");
+@import url("@fontsource/inter/500.css");
+@import url("@fontsource/inter/600.css");
+@import url("@fontsource/inter/700.css");
+@import url("@fontsource/inconsolata/400.css");
+@import url("@fontsource/inconsolata/700.css");
+
+@import url("@vector-im/compound-design-tokens/assets/web/css/compound-design-tokens.css") layer(compound);
+@import url("@vector-im/compound-web/dist/style.css") layer(compound.components);
 
 body {
   background-color: var(--cpd-color-bg-canvas-default);
@@ -50,4 +66,37 @@ body,
 #root > [data-overlay-container] {
   position: relative;
   height: 100%;
+}
+
+/* normalize.css sets the focus rings on buttons in Firefox to an unusual custom
+outline, which is inconsistent with our other components and is not sufficiently
+visible to be accessible. This resets it back to 'auto'. */
+button:-moz-focusring,
+[type="button"]:-moz-focusring,
+[type="reset"]:-moz-focusring,
+[type="submit"]:-moz-focusring {
+  outline: auto;
+}
+
+/* The Letro background is generated from tokens, including on mobile. */
+[data-element-call-root][data-call-brand="letro"][data-background="gradient"]::before {
+  background-image: var(--call-page-background);
+}
+
+@media (forced-colors: active) {
+  [data-element-call-root][data-call-brand="letro"] {
+    --call-speaking-gradient: linear-gradient(Highlight, Highlight);
+  }
+}
+
+/* Browser-native focus colors must use the same reviewed brand token. */
+[data-element-call-root][data-call-brand="letro"] :focus-visible {
+  outline: 2px solid var(--call-focus);
+  outline-offset: 2px;
+}
+
+@media (forced-colors: active) {
+  [data-element-call-root][data-call-brand="letro"] :focus-visible {
+    outline-color: Highlight;
+  }
 }

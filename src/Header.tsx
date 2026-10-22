@@ -5,6 +5,9 @@ SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Element-Commercial
 Please see LICENSE in the repository root for full details.
 */
 
+import { getProductName } from "./branding/brand";
+import { useBrand } from "./branding/useBrand";
+
 import classNames from "classnames";
 import {
   type Ref,
@@ -18,6 +21,7 @@ import { Heading, Text } from "@vector-im/compound-web";
 import { UserProfileIcon } from "@vector-im/compound-design-tokens/assets/web/icons";
 
 import styles from "./Header.module.css";
+import { BrandLogo } from "./branding/BrandLogo";
 import Logo from "./icons/Logo.svg?react";
 import { Avatar, Size } from "./Avatar";
 import { EncryptionLock } from "./room/EncryptionLock";
@@ -125,12 +129,13 @@ interface HeaderLogoProps {
 export const HeaderLogo: FC<HeaderLogoProps> = ({ className }) => {
   const { t } = useTranslation();
   const leaveToHome = useLeaveToHome();
+  const brand = useBrand();
   const onClick = useCallback(() => leaveToHome?.(), [leaveToHome]);
 
   if (leaveToHome === null)
     return (
       <div className={classNames(styles.headerLogo, className)}>
-        <Logo />
+        <BrandLogo element={Logo} />
       </div>
     );
   return (
@@ -138,9 +143,13 @@ export const HeaderLogo: FC<HeaderLogoProps> = ({ className }) => {
       type="button"
       className={classNames(styles.headerLogo, className)}
       onClick={onClick}
-      aria-label={t("header_label")}
+      aria-label={
+        brand === "letro"
+          ? t("branding.home", { brand: getProductName(brand) })
+          : t("header_label")
+      }
     >
-      <Logo />
+      <BrandLogo element={Logo} />
     </button>
   );
 };

@@ -28,6 +28,7 @@ import {
   nullHostBridge,
 } from "./HostBridge";
 
+vi.mock("./branding/brand", () => ({ getCallBrand: () => "letro" }));
 vi.mock("./UrlParams", () => ({ useUrlParams: vi.fn() }));
 
 describe("useTheme", () => {
@@ -95,6 +96,17 @@ describe("useTheme", () => {
     // The stylesheets find the root by this rather than by naming `body`, so
     // that they still apply when Element Call is mounted into a container
     expect(document.body.hasAttribute("data-element-call-root")).toBe(true);
+  });
+
+  test("uses the component brand instead of the standalone brand", () => {
+    (useUrlParams as Mock).mockReturnValue({ theme: "dark", brand: "element" });
+    renderHook(() => useTheme(), { wrapper });
+    expect(document.body.dataset.callBrand).toBe("element");
+  });
+
+  test("retains the initialized deployment brand for standalone mode", () => {
+    renderHook(() => useTheme(), { wrapper });
+    expect(document.body.dataset.callBrand).toBe("letro");
   });
 
   test("records the platform on the root, for the stylesheets", () => {

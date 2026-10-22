@@ -24,7 +24,7 @@ import {
   type LocalVideoTrack,
   Track,
 } from "livekit-client";
-import { useObservableEagerState } from "observable-hooks";
+import { convertToLivekitProcessor } from "@element-hq/matrixrtc-sdk";
 
 import inCallStyles from "./InCallView.module.css";
 import styles from "./LobbyView.module.css";
@@ -43,7 +43,7 @@ import { useInitial } from "../useInitial";
 import {
   useTrackProcessor,
   useTrackProcessorSync,
-} from "../livekit/TrackProcessorContext";
+} from "../tracks/TrackProcessorContext";
 import { getValue } from "../utils/observable";
 import { useBehavior } from "../useBehavior";
 import { CallFooter, type FooterSnapshot } from "../components/CallFooter";
@@ -125,9 +125,7 @@ export const LobbyView: FC<Props> = ({
   );
 
   const devices = useMediaDevices();
-  const videoInputId = useObservableEagerState(
-    devices.videoInput.selected$,
-  )?.id;
+  const videoInputId = useBehavior(devices.videoInput.selected$)?.id;
 
   // Capture the audio options as they were when we first mounted, because
   // we're not doing anything with the audio anyway so we don't need to
@@ -153,7 +151,8 @@ export const LobbyView: FC<Props> = ({
       audio: Object.assign({}, initialAudioOptions),
       video: videoEnabled && {
         deviceId: videoInputId,
-        processor: initialProcessor,
+        processor:
+          initialProcessor && convertToLivekitProcessor(initialProcessor),
       },
     }),
     [initialAudioOptions, videoEnabled, videoInputId, initialProcessor],

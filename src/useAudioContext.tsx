@@ -6,8 +6,7 @@ Please see LICENSE in the repository root for full details.
 */
 
 import { logger } from "matrix-js-sdk/lib/logger";
-import { useState, useEffect } from "react";
-import { useObservableEagerState } from "observable-hooks";
+import { useState, useEffect, useMemo } from "react";
 
 import {
   soundEffectVolume as soundEffectVolumeSetting,
@@ -17,6 +16,7 @@ import { useEarpieceAudioConfig, useMediaDevices } from "./MediaDevicesContext";
 import { type PrefetchedSounds } from "./soundUtils";
 import { useUrlParams } from "./UrlParams";
 import * as controls from "./controls";
+import { useBehavior } from "./useBehavior";
 
 /**
  * Play a sound though a given AudioContext. Will take
@@ -145,6 +145,7 @@ export function useAudioContext<S extends string>(
       latencyHint: props.latencyHint,
     });
 
+    let disposed = false;
     // We want to clone the content of our preloaded
     // sound buffers into this context. The context may
     // close during this process, so it's okay if it throws.
@@ -154,13 +155,15 @@ export function useAudioContext<S extends string>(
         const audioBuffer = await ctx.decodeAudioData(buffer.slice(0));
         buffers[name] = audioBuffer;
       }
-      setAudioBuffers(buffers as Record<S, AudioBuffer>);
+      if (!disposed) setAudioBuffers(buffers as Record<S, AudioBuffer>);
     })().catch((ex) => {
-      logger.debug("Failed to setup audio context", ex);
+      logger.warn("Failed to setup audio context", ex);
     });
 
     setAudioContext(ctx);
     return (): void => {
+      disposed = true;
+      setAudioBuffers(undefined);
       void ctx.close().catch((ex) => {
         logger.debug("Failed to close audio engine", ex);
       });
@@ -168,11 +171,10 @@ export function useAudioContext<S extends string>(
     };
   }, [props.sounds, props.latencyHint]);
 
-  const audioOutputId = useObservableEagerState(
+  const audioOutputId = useBehavior(
     useMediaDevices().audioOutput.selected$,
   )?.id;
   const { controlledAudioDevices } = useUrlParams();
-
   // Update the sink ID whenever we change devices.
   useEffect(() => {
     if (
@@ -189,41 +191,48 @@ export function useAudioContext<S extends string>(
   }, [audioContext, audioOutputId, controlledAudioDevices]);
   const { pan: earpiecePan, volume: earpieceVolume } = useEarpieceAudioConfig();
 
-  // Don't return a function until we're ready.
-  if (!audioContext || !audioBuffers || props.muted) {
-    return null;
-  }
-
-  return {
-    playSound: async (name, volumeOverwrite?: number): Promise<void> => {
-      if (!audioBuffers[name]) {
-        logger.debug(`Tried to play a sound that wasn't buffered (${name})`);
-        return;
-      }
-      return playSound(
-        audioContext,
-        audioBuffers[name],
-        volumeOverwrite ?? soundEffectVolume * earpieceVolume,
-        earpiecePan,
-      );
-    },
-    playSoundLooping: (name, delayS: number): (() => Promise<void>) => {
-      if (!audioBuffers[name]) {
-        throw Error(`Tried to play a sound that wasn't buffered (${name})`);
-      }
-      return playSoundLooping(
-        audioContext,
-        audioBuffers[name],
-        soundEffectVolume * earpieceVolume,
-        earpiecePan,
-        delayS,
-      );
-    },
-    soundDuration: Object.fromEntries(
-      Object.entries(audioBuffers).map(([k, v]) => [
-        k,
-        (v as AudioBuffer).duration,
-      ]),
-    ),
-  };
+  const audio = useMemo(() => {
+    if (!audioContext || !audioBuffers || props.muted) return null;
+    return {
+      playSound: async (name: S, volumeOverwrite?: number): Promise<void> => {
+        if (!audioBuffers[name]) {
+          logger.debug(`Tried to play a sound that wasn't buffered (${name})`);
+          return;
+        }
+        return playSound(
+          audioContext,
+          audioBuffers[name],
+          volumeOverwrite ?? soundEffectVolume * earpieceVolume,
+          earpiecePan,
+        );
+      },
+      playSoundLooping: (name: S, delayS?: number): (() => Promise<void>) => {
+        if (!audioBuffers[name]) {
+          logger.debug(`Tried to play a sound that wasn't buffered (${name})`);
+          return async () => {};
+        }
+        return playSoundLooping(
+          audioContext,
+          audioBuffers[name],
+          soundEffectVolume * earpieceVolume,
+          earpiecePan,
+          delayS,
+        );
+      },
+      soundDuration: Object.fromEntries(
+        Object.entries(audioBuffers).map(([k, v]) => [
+          k,
+          (v as AudioBuffer).duration,
+        ]),
+      ),
+    };
+  }, [
+    audioContext,
+    audioBuffers,
+    props.muted,
+    soundEffectVolume,
+    earpieceVolume,
+    earpiecePan,
+  ]);
+  return audio;
 }

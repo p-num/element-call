@@ -5,11 +5,15 @@ SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Element-Commercial
 Please see LICENSE in the repository root for full details.
 */
 
+import { getProductName } from "../branding/brand";
+import { useBrand } from "../branding/useBrand";
+
 import { type FC, type FormEvent, useCallback, useRef, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { Trans, useTranslation } from "react-i18next";
 import { Button } from "@vector-im/compound-web";
 
+import { BrandLogo } from "../branding/BrandLogo";
 import Logo from "../icons/LogoLarge.svg?react";
 import { useClient } from "../ClientContext";
 import { FieldRow, InputField, ErrorMessage } from "../input/Input";
@@ -21,6 +25,7 @@ import { Config } from "../config/Config";
 import { Link } from "../button/Link";
 
 export const LoginPage: FC = () => {
+  const brand = useBrand();
   const { t } = useTranslation();
   usePageTitle(t("login_title"));
 
@@ -85,10 +90,19 @@ export const LoginPage: FC = () => {
       <div className={styles.container}>
         <div className={styles.content}>
           <div className={styles.formContainer}>
-            <Logo width="auto" height="auto" className={styles.logo} />
+            <BrandLogo
+              element={Logo}
+              width="auto"
+              height="auto"
+              className={styles.logo}
+            />
 
             <h2>{t("log_in")}</h2>
-            <h4>{t("login_subheading")}</h4>
+            <h4>
+              {brand === "letro"
+                ? t("branding.login", { brand: getProductName(brand) })
+                : t("login_subheading")}
+            </h4>
             <form onSubmit={onSubmitLoginForm}>
               <FieldRow>
                 <InputField

@@ -5,6 +5,8 @@ SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Element-Commercial
 Please see LICENSE in the repository root for full details.
 */
 
+import { getProductName } from "./branding/brand";
+import { useBrand } from "./branding/useBrand";
 import { useTranslation } from "react-i18next";
 import { PopOutIcon } from "@vector-im/compound-design-tokens/assets/web/icons";
 
@@ -28,13 +30,14 @@ export class RichError extends Error {
 }
 
 const OpenElsewhere: FC = () => {
+  const brand = useBrand();
   const { t } = useTranslation();
 
   return (
     <ErrorView Icon={PopOutIcon} title={t("error.open_elsewhere")}>
       <p>
         {t("error.open_elsewhere_description", {
-          brand: import.meta.env.VITE_PRODUCT_NAME || "Element Call",
+          brand: getProductName(brand),
         })}
       </p>
     </ErrorView>

@@ -12,6 +12,7 @@ import {
   type ConfigEnv,
   type UserConfig,
 } from "vite";
+import { generateThemeCSS } from "./src/branding/theme";
 import svgrPlugin from "vite-plugin-svgr";
 import { createHtmlPlugin } from "vite-plugin-html";
 
@@ -23,6 +24,7 @@ import babel from "@rolldown/plugin-babel";
 import react, { reactCompilerPreset } from "@vitejs/plugin-react";
 import { realpathSync } from "fs";
 import * as fs from "node:fs";
+import { fileURLToPath } from "node:url";
 
 export const vitePluginsConfig = ({
   mode,
@@ -36,7 +38,21 @@ export const vitePluginsConfig = ({
   html?: boolean;
 }): UserConfig => {
   const env = loadEnv(mode, process.cwd());
+  fs.writeFileSync(
+    new URL("./src/branding/generated.css", import.meta.url),
+    generateThemeCSS() + "\n",
+  );
   const plugins: PluginOption[] = [
+    {
+      name: "call-brand-contract",
+      generateBundle() {
+        this.emitFile({
+          type: "asset",
+          fileName: "call-branding.json",
+          source: JSON.stringify({ version: 1, brands: ["element", "letro"] }),
+        });
+      },
+    },
     babel({
       presets: [reactCompilerPreset()],
     }),
@@ -89,7 +105,18 @@ export const vitePluginsConfig = ({
     );
   }
 
-  return { plugins };
+  return {
+    plugins,
+    resolve: {
+      alias: {
+        // The SDK by its package name, resolved to its source, for every
+        // config built on this one: see the matching entry in tsconfig.json
+        "@element-hq/matrixrtc-sdk": fileURLToPath(
+          new URL("./sdk/index.ts", import.meta.url),
+        ),
+      },
+    },
+  };
 };
 // https://vitejs.dev/config/
 // Modified type helper from defineConfig to allow for packageType (see defineConfig from vite)
@@ -161,6 +188,9 @@ export default ({
         // which Vite for some reason refuses to work with, so we point it to
         // src/index.ts instead
         "matrix-widget-api": "matrix-widget-api/src/index.ts",
+        "@element-hq/matrixrtc-sdk": fileURLToPath(
+          new URL("./sdk/index.ts", import.meta.url),
+        ),
       },
       dedupe: [
         "react",

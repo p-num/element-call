@@ -15,7 +15,6 @@ import { prefetchSounds } from "../soundUtils";
 import ringtoneMp3 from "../sound/ringtone.mp3?url";
 import ringtoneOgg from "../sound/ringtone.ogg?url";
 import { type UseAudioContext, useAudioContext } from "../useAudioContext";
-import { useLatest } from "../useLatest";
 
 interface RingingAudioRendererProps {
   vm: RingingMediaViewModel | null;
@@ -50,15 +49,14 @@ const ActiveRingingAudioRenderer: FC<ActiveRingingAudioRendererProps> = ({
   vm,
   audio,
 }) => {
-  const audio_ = useLatest(audio);
   const pickupState = useBehavior(vm.pickupState$);
 
   // While ringing, loop the ringtone
   useEffect((): void | (() => void) => {
-    if (pickupState === "ringing" && audio_.current) {
-      const endSound = audio_.current.playSoundLooping(
+    if (pickupState === "ringing" && audio) {
+      const endSound = audio.playSoundLooping(
         "ringtone",
-        audio_.current.soundDuration["ringtone"] ?? 1,
+        audio.soundDuration["ringtone"] ?? 1,
       );
       return () => {
         void endSound().catch((e) => {
@@ -66,7 +64,7 @@ const ActiveRingingAudioRenderer: FC<ActiveRingingAudioRendererProps> = ({
         });
       };
     }
-  }, [pickupState, audio_]);
+  }, [pickupState, audio]);
 
   return null;
 };

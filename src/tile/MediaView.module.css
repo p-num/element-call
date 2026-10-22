@@ -91,9 +91,7 @@ Please see LICENSE in the repository root for full details.
 }
 
 .speakingBorder {
-  background:
-    radial-gradient(#0467dd, #0bc491),
-    linear-gradient(0deg, #0467dd 0%, #0bc491 100%);
+  background: var(--call-speaking-gradient);
   background-blend-mode: overlay, normal;
   outline: var(--cpd-border-width-4) solid var(--cpd-color-bg-canvas-default);
 
