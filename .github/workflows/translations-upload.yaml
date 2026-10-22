@@ -8,6 +8,7 @@ on:
 
 jobs:
   upload:
+    if: github.repository == 'element-hq/element-call'
     runs-on: ubuntu-latest
     permissions:
       contents: read
