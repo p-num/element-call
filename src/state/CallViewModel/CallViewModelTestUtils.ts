@@ -249,11 +249,10 @@ export function withCallViewModel(mode: MatrixRTCMode) {
         participationState$ ??
         scope.behavior(
           connected$.pipe(
-            map(
-              (connected): ParticipationState =>
-                connected
-                  ? { kind: "connected" }
-                  : { kind: "reconnecting", reason: "media" },
+            map((connected): ParticipationState =>
+              connected
+                ? { kind: "connected" }
+                : { kind: "reconnecting", reason: "media" },
             ),
           ),
         ),
