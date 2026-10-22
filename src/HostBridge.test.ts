@@ -249,7 +249,7 @@ describe("createWidgetHostBridge", () => {
       const widget = mockWidget({ transport } as never);
       const bridge = createWidgetHostBridge(widget);
       const departure = Promise.withResolvers<boolean>();
-      const participation = { leave: vi.fn(() => departure.promise) };
+      const participation = { leave: vi.fn(async () => departure.promise) };
       const pending: Promise<void>[] = [];
       bridge.hangUp$.subscribe((request) => {
         pending.push(handleHostHangup(request, participation));

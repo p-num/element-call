@@ -260,9 +260,9 @@ export class MockRTCSession extends TypedEventEmitter<
     counters: {},
   };
 
-  public leave: ReturnType<typeof vitest.fn> = vitest
-    .fn()
-    .mockResolvedValue(undefined);
+  public leave = vitest
+    .fn<(timeout?: number) => Promise<boolean>>()
+    .mockResolvedValue(true);
 
   public constructor(
     public readonly room: Room,

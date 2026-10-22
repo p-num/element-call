@@ -390,18 +390,17 @@ describe("createRTCParticipation", () => {
     const result = Promise.withResolvers<boolean>();
     const ended = vi.fn();
     scope.onEnd(ended);
-    session.leave.mockImplementation(() => {
+    session.leave.mockImplementation(async () => {
       expect(fake.setPublishing).toHaveBeenLastCalledWith(false);
       expect(ended).toHaveBeenCalledOnce();
       return result.promise;
     });
     const first = participation.leave();
     const second = participation.leave();
-    expect(second).toBe(first);
     expect(participation.state$.value).toEqual({ kind: "left" });
     await flushPromises();
     result.resolve(false);
-    expect(await first).toBe(false);
+    expect(await Promise.all([first, second])).toEqual([false, false]);
     expect(await participation.leave()).toBe(false);
     expect(session.leave).toHaveBeenCalledOnce();
   });

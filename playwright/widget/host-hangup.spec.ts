@@ -18,6 +18,12 @@ interface WidgetMessage {
   response?: { left?: boolean };
 }
 
+declare global {
+  interface Window {
+    recordCallStatusMessage: (message: WidgetMessage) => Promise<void>;
+  }
+}
+
 widgetTest.use({ callType: "dm" });
 
 for (const shape of ["omitted", "null", "confirmed"] as const) {
@@ -93,11 +99,7 @@ async function recordWidgetMessages(page: Page): Promise<WidgetMessage[]> {
     },
   );
   await page.evaluate(() => {
-    const record = (
-      window as Window & {
-        recordCallStatusMessage: (message: unknown) => Promise<void>;
-      }
-    ).recordCallStatusMessage;
+    const record = window.recordCallStatusMessage;
     window.addEventListener("message", (event: MessageEvent) => {
       const message = event.data;
       if (

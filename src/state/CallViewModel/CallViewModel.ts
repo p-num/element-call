@@ -53,7 +53,6 @@ import {
   switchMap,
   switchScan,
   take,
-  tap,
   throttleTime,
   timer,
   takeUntil,
@@ -798,7 +797,7 @@ export function createCallViewModel$(
   const userHangup$ = new Subject<void>();
 
   const hostHangup$ = hostBridge.hangUp$.pipe(
-    mergeMap((request) => handleHostHangup(request, rtcParticipation)),
+    mergeMap(async (request) => handleHostHangup(request, rtcParticipation)),
   );
 
   const leave$: Observable<"user" | "timeout" | "decline" | "allOthersLeft"> =

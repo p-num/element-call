@@ -12,7 +12,7 @@ import { handleHostHangup } from "./HostHangup";
 describe("host-requested leave acknowledgement", () => {
   it("does not acknowledge before the participation confirms departure", async () => {
     const departure = Promise.withResolvers<boolean>();
-    const participation = { leave: vi.fn(() => departure.promise) };
+    const participation = { leave: vi.fn(async () => departure.promise) };
     const reply = vi.fn();
     const pending = handleHostHangup(
       { data: { wait_for_leave: true }, reply },

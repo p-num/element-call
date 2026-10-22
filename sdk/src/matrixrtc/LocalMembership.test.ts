@@ -48,7 +48,6 @@ describe("createLocalMembership$", () => {
     await flushPromises();
     const first = membership.leave();
     const second = membership.leave();
-    expect(second).toBe(first);
     expect(membership.state$.value).toEqual({ kind: "left" });
     let settled = false;
     void first.then(() => {
@@ -58,7 +57,7 @@ describe("createLocalMembership$", () => {
     expect(settled).toBe(false);
     expect(leave).toHaveBeenCalledExactlyOnceWith(10_000);
     result.resolve(false);
-    expect(await first).toBe(false);
+    expect(await Promise.all([first, second])).toEqual([false, false]);
     expect(await membership.leave()).toBe(false);
     expect(leave).toHaveBeenCalledOnce();
   });

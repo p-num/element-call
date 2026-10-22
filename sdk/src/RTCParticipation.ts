@@ -256,7 +256,7 @@ export function createRTCParticipation(
   );
 
   let leaveResult: Promise<boolean> | undefined;
-  const leave = (): Promise<boolean> => {
+  const leave = async (): Promise<boolean> => {
     if (leaveResult !== undefined) return leaveResult;
     leaveResult = localMembership.leave();
     scope.end();

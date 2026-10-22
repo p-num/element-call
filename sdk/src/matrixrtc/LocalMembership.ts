@@ -113,7 +113,7 @@ export function createLocalMembership$({
   const matrixError$ = new BehaviorSubject<MatrixRTCError | null>(null);
   let entered = false;
   let leaveResult: Promise<boolean> | undefined;
-  const leaveSession = (): Promise<boolean> => {
+  const leaveSession = async (): Promise<boolean> => {
     leaveResult ??= entered
       ? confirmedLeave(
           matrixRTCSession,
@@ -194,7 +194,7 @@ export function createLocalMembership$({
   );
 
   return {
-    leave: () => {
+    leave: async () => {
       joined$.next(false);
       return leaveSession();
     },
@@ -237,7 +237,7 @@ async function confirmedLeave(
   try {
     const left = await Promise.race([
       // Teardown stops local media before the network leave starts.
-      Promise.resolve().then(() => session.leave(10_000)),
+      Promise.resolve().then(async () => session.leave(10_000)),
       new Promise<false>((resolve) => {
         deadline = setTimeout(() => resolve(false), 10_000);
       }),
