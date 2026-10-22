@@ -159,8 +159,8 @@ export type ParticipationState =
 /** The span between our `join()` of a slot and our `leave()`. */
 export interface RTCParticipation {
   readonly slot: RTCSlot;
-  /** Sends the leave, tears the connections down and ends the participation. */
-  leave(): void;
+  /** Ends local media immediately and shares the bounded membership-departure result. */
+  leave(): Promise<boolean>;
   state$: Behavior<ParticipationState>;
 
   /** Null until our own membership has been seen in the room. */

@@ -255,10 +255,12 @@ export function createRTCParticipation(
     ),
   );
 
-  const leave = (): void => {
-    if (state$.value.kind === "left") return;
-    localMembership.leave();
+  let leaveResult: Promise<boolean> | undefined;
+  const leave = async (): Promise<boolean> => {
+    if (leaveResult !== undefined) return leaveResult;
+    leaveResult = localMembership.leave();
     scope.end();
+    return leaveResult;
   };
 
   return {

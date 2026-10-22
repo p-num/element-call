@@ -289,6 +289,37 @@ test("Should ask the host to close when all other left and play a sound", async 
   await waitFor(() => expect(close).toHaveBeenCalledOnce());
 }, 80000);
 
+test("closes an ended call when its leave sound and optional host hint never settle", async () => {
+  const close = vi.fn().mockResolvedValue(undefined);
+  const hostBridge: HostBridge = {
+    ...nullHostBridge,
+    setAlwaysOnScreen: vi.fn().mockImplementation(async (keep) => {
+      if (!keep) await new Promise<void>(() => {});
+    }),
+    close,
+  };
+  playSound.mockReturnValue(new Promise<void>(() => {}));
+  const { getByText } = createCallView(hostBridge);
+  await flushPromises();
+  vi.useFakeTimers();
+  try {
+    act(() => getByText("Leave").click());
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(999);
+    });
+    expect(close).not.toHaveBeenCalled();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_001);
+    });
+    expect(close).toHaveBeenCalledOnce();
+    expect(hostBridge.setAlwaysOnScreen).toHaveBeenCalledWith(false);
+    expect(vi.getTimerCount()).toBe(0);
+  } finally {
+    vi.clearAllTimers();
+    vi.useRealTimers();
+  }
+});
+
 test("Waits for the host to say when to join, when preloaded", async () => {
   // Nothing to match device names against; the host names none anyway
   vi.spyOn(LivekitRoom, "getLocalDevices").mockResolvedValue([]);

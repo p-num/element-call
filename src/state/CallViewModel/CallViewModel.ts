@@ -41,6 +41,7 @@ import {
   fromEvent,
   map,
   merge,
+  mergeMap,
   NEVER,
   type Observable,
   of,
@@ -52,7 +53,6 @@ import {
   switchMap,
   switchScan,
   take,
-  tap,
   throttleTime,
   timer,
   takeUntil,
@@ -84,6 +84,8 @@ import { type MediaDevice, type MediaDevices } from "../MediaDevices";
 import { type Handler, type MuteStates } from "../MuteStates";
 import { HeaderStyle, type UrlParams } from "../../UrlParams";
 import { type HostBridge, nullHostBridge } from "../../HostBridge";
+import { handleHostHangup } from "./HostHangup";
+import { observeHostConnection } from "./HostConnection";
 import {
   type Alignment,
   type Layout,
@@ -623,6 +625,14 @@ export function createCallViewModel$(
     localUser: { userId, deviceId },
   });
 
+  observeHostConnection(
+    rtcParticipation.state$.pipe(
+      map((state) => state.kind === "connected"),
+      scope.bind(),
+    ),
+    hostBridge.notifyConnectionState,
+  );
+
   const reconnecting$ = scope.behavior(
     rtcParticipation.state$.pipe(map((state) => state.kind === "reconnecting")),
   );
@@ -787,9 +797,7 @@ export function createCallViewModel$(
   const userHangup$ = new Subject<void>();
 
   const hostHangup$ = hostBridge.hangUp$.pipe(
-    tap((request) => {
-      request.reply();
-    }),
+    mergeMap(async (request) => handleHostHangup(request, rtcParticipation)),
   );
 
   const leave$: Observable<"user" | "timeout" | "decline" | "allOthersLeft"> =
@@ -1506,7 +1514,7 @@ export function createCallViewModel$(
     logger.error("Failed to notify the host that we joined", e);
   });
   const leave = (): void => {
-    rtcParticipation.leave();
+    void rtcParticipation.leave();
     hostBridge.notifyHungUp().catch((e) => {
       logger.error("Failed to notify the host that we hung up", e);
     });

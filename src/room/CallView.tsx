@@ -70,6 +70,7 @@ import { useAppBarTitle } from "../AppBar.tsx";
 import { useBehavior } from "../useBehavior.ts";
 import { useRootElement } from "../RootElementContext.ts";
 import { useHostBridge } from "../HostBridge.ts";
+import { waitForCallCleanup } from "../state/CallViewModel/CallCleanup";
 import { useMuteStates } from "../state/useMuteStates.ts";
 import { useLeaveToHome } from "../LeaveToHomeContext.ts";
 
@@ -375,22 +376,15 @@ const LoadedCallView: FC<LoadedProps> = ({
     (
       reason: "timeout" | "user" | "allOthersLeft" | "decline" | "error",
     ): void => {
-      let audioPromise: Promise<void> | undefined = undefined;
-      switch (reason) {
-        case "allOthersLeft":
-          // When "allOthersLeft", the leaveSoundEffect$ in CallEventAudioRenderer
-          // already plays the "left" sound when the remote participant's media
-          // disappears. We play it here silenced (volumeOverwrite = 0) so we have the right duration in the audioPromise.
-          // (which is what delays asking the host to close us)
-          audioPromise = leaveSoundContext.current?.playSound("left", 0);
-          break;
-        case "timeout":
-        case "decline":
-          audioPromise = leaveSoundContext.current?.playSound(reason);
-          break;
-        default:
-          audioPromise = leaveSoundContext.current?.playSound("left");
-      }
+      const sound =
+        reason === "timeout" || reason === "decline" ? reason : "left";
+      const audio = leaveSoundContext.current;
+      // The remote departure already played this sound through CallEventAudioRenderer.
+      const audioPromise =
+        reason === "allOthersLeft"
+          ? audio?.playSound(sound, 0)
+          : audio?.playSound(sound);
+      const soundDurationMs = (audio?.soundDuration[sound] ?? 0) * 1_000;
 
       setJoined(false);
       setLeft(true);
@@ -414,37 +408,33 @@ const LoadedCallView: FC<LoadedProps> = ({
         window.setTimeout(resolve, 10);
       });
 
-      void Promise.all([audioPromise, posthogRequest])
-        .catch((e) =>
-          logger.error(
-            "Failed to play leave audio and/or send PostHog leave event",
-            e,
-          ),
+      void waitForCallCleanup(
+        [audioPromise, posthogRequest],
+        soundDurationMs,
+      ).then(async () => {
+        if (
+          !isPasswordlessUser &&
+          !confineToRoom &&
+          !PosthogAnalytics.instance.isEnabled()
         )
-        .then(async () => {
-          if (
-            !isPasswordlessUser &&
-            !confineToRoom &&
-            !PosthogAnalytics.instance.isEnabled()
-          )
-            leaveToHome?.();
+          leaveToHome?.();
 
-          // After this point the host could dispose of us at any moment!
+        // After this point the host could dispose of us at any moment!
+        try {
+          await waitForCallCleanup([hostBridge.setAlwaysOnScreen(false)]);
+        } catch (e) {
+          logger.error("Failed to set `alwaysOnScreen` to false", e);
+        }
+        // On a normal user hangup we can shut down and ask to be closed. But
+        // if an error occurs we should stay open until the user reads it.
+        if (reason != "error" && !returnToLobby) {
           try {
-            await hostBridge.setAlwaysOnScreen(false);
+            await hostBridge.close?.();
           } catch (e) {
-            logger.error("Failed to set `alwaysOnScreen` to false", e);
+            logger.error("Failed to ask the host to close Element Call", e);
           }
-          // On a normal user hangup we can shut down and ask to be closed. But
-          // if an error occurs we should stay open until the user reads it.
-          if (reason != "error" && !returnToLobby) {
-            try {
-              await hostBridge.close?.();
-            } catch (e) {
-              logger.error("Failed to ask the host to close Element Call", e);
-            }
-          }
-        });
+        }
+      });
     },
     [
       setJoined,

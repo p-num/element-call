@@ -37,6 +37,9 @@ export type DeviceMuteRequest = {
   video_enabled?: boolean;
 };
 
+export type HangupRequest = { wait_for_leave?: boolean } | null | undefined;
+export type HangupReply = { left: boolean };
+
 /**
  * Something the host has asked of Element Call, which it is expected to
  * acknowledge.
@@ -71,6 +74,8 @@ export interface HostBridge {
   contentLoaded(): Promise<void>;
   /** Tells the host that the user has joined the call. */
   notifyJoined(): Promise<void>;
+  /** Current local MatrixRTC and media connection; never inferred from join intent. */
+  notifyConnectionState?(state: { connected: boolean }): Promise<void>;
   /** Tells the host that the user has hung up. */
   notifyHungUp(): Promise<void>;
   /** Tells the host the user's current audio and video mute state. */
@@ -92,7 +97,7 @@ export interface HostBridge {
   /** The host wants a preloaded Element Call to join the call now. */
   join$: Observable<HostRequest<JoinCallData>>;
   /** The host wants Element Call to leave the call. */
-  hangUp$: Observable<HostRequest<Record<string, never>>>;
+  hangUp$: Observable<HostRequest<HangupRequest, HangupReply | void>>;
   /** The host wants to change, or read back, the device mute state. */
   deviceMute$: Observable<HostRequest<DeviceMuteRequest, DeviceMuteState>>;
 
@@ -175,12 +180,19 @@ export function createWidgetHostBridge(widget: WidgetHelpers): HostBridge {
     await widget.api.transport.send(action, data);
   };
 
+  // One sequence for this widget, including replacement participations.
+  let connectionSequence = 0;
   return {
     setAlwaysOnScreen: async (alwaysOnScreen) => {
       await widget.api.setAlwaysOnScreen(alwaysOnScreen);
     },
     contentLoaded: async () => widget.api.sendContentLoaded(),
     notifyJoined: async () => send(ElementWidgetActions.JoinCall),
+    notifyConnectionState: async (state) =>
+      send(ElementWidgetActions.ConnectionState, {
+        ...state,
+        sequence: connectionSequence++,
+      }),
     notifyHungUp: async () => send(ElementWidgetActions.HangupCall),
     notifyDeviceMute: async (state) =>
       send(ElementWidgetActions.DeviceMute, state),

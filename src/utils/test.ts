@@ -531,7 +531,7 @@ export function mockRTCParticipation(
   };
   const participation: RTCParticipation = {
     slot,
-    leave: vi.fn(),
+    leave: vi.fn().mockResolvedValue(true),
     state$,
     localMember$,
     remoteMembers$,

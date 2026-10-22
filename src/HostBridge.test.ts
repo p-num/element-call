@@ -9,7 +9,7 @@ import { describe, expect, test, vi } from "vitest";
 import { type WidgetApi, WidgetApiToWidgetAction } from "matrix-widget-api";
 import EventEmitter from "events";
 
-import { type Observable } from "rxjs";
+import { type Observable, Subject } from "rxjs";
 
 import {
   createWidgetHostBridge,
@@ -17,6 +17,8 @@ import {
   nullHostBridge,
 } from "./HostBridge";
 import { ElementWidgetActions, type WidgetHelpers } from "./widget";
+import { observeHostConnection } from "./state/CallViewModel/HostConnection";
+import { handleHostHangup } from "./state/CallViewModel/HostHangup";
 
 function mockWidget(api: Partial<WidgetApi>): WidgetHelpers {
   return {
@@ -71,6 +73,56 @@ describe("createWidgetHostBridge", () => {
       await bridge[method]();
 
       expect(transport.send).toHaveBeenCalledWith(action, payload);
+    });
+
+    test("sends local connection state separately from join intent", async () => {
+      const transport = mockTransport();
+      const bridge = createWidgetHostBridge(mockWidget({ transport } as never));
+      await bridge.notifyConnectionState?.({ connected: true });
+      expect(transport.send).toHaveBeenCalledWith(
+        ElementWidgetActions.ConnectionState,
+        { connected: true, sequence: 0 },
+      );
+    });
+
+    test("keeps connection reports ordered across recovery observation scopes", () => {
+      const transport = mockTransport();
+      const bridge = createWidgetHostBridge(mockWidget({ transport } as never));
+      const first = new Subject<boolean>();
+      const subscription = observeHostConnection(
+        first,
+        bridge.notifyConnectionState,
+      );
+      first.next(false);
+      first.next(true);
+      subscription.unsubscribe();
+      const retry = new Subject<boolean>();
+      const recovered = observeHostConnection(
+        retry,
+        bridge.notifyConnectionState,
+      );
+      retry.next(false);
+      retry.next(true);
+      first.next(false);
+      recovered.unsubscribe();
+      expect(transport.send.mock.calls).toEqual([
+        [
+          ElementWidgetActions.ConnectionState,
+          { connected: false, sequence: 0 },
+        ],
+        [
+          ElementWidgetActions.ConnectionState,
+          { connected: true, sequence: 1 },
+        ],
+        [
+          ElementWidgetActions.ConnectionState,
+          { connected: false, sequence: 2 },
+        ],
+        [
+          ElementWidgetActions.ConnectionState,
+          { connected: true, sequence: 3 },
+        ],
+      ]);
     });
 
     test("sends the mute state the host needs to mirror", async () => {
@@ -163,6 +215,65 @@ describe("createWidgetHostBridge", () => {
 
       // The widget API requires an answer, so an empty reply becomes {}
       expect(transport.reply).toHaveBeenCalledWith(ev.detail, {});
+    });
+
+    test.each(["omitted", "null", "empty"] as const)(
+      "processes a legacy Android hangup with %s data",
+      async (shape) => {
+        const transport = mockTransport();
+        const widget = mockWidget({ transport } as never);
+        const bridge = createWidgetHostBridge(widget);
+        const participation = { leave: vi.fn().mockResolvedValue(true) };
+        let handled: Promise<void> | undefined;
+        bridge.hangUp$.subscribe((request) => {
+          handled = handleHostHangup(request, participation);
+        });
+        const request = {
+          action: ElementWidgetActions.HangupCall,
+          ...(shape === "omitted"
+            ? {}
+            : { data: shape === "null" ? null : {} }),
+        };
+        widget.lazyActions.emit(
+          ElementWidgetActions.HangupCall,
+          new CustomEvent(ElementWidgetActions.HangupCall, { detail: request }),
+        );
+        expect(transport.reply).toHaveBeenCalledExactlyOnceWith(request, {});
+        expect(participation.leave).not.toHaveBeenCalled();
+        await handled;
+      },
+    );
+
+    test("preserves request correlation while waiting for confirmed leave", async () => {
+      const transport = mockTransport();
+      const widget = mockWidget({ transport } as never);
+      const bridge = createWidgetHostBridge(widget);
+      const departure = Promise.withResolvers<boolean>();
+      const participation = { leave: vi.fn(async () => departure.promise) };
+      const pending: Promise<void>[] = [];
+      bridge.hangUp$.subscribe((request) => {
+        pending.push(handleHostHangup(request, participation));
+      });
+      const requests = ["first", "second"].map((requestId) => ({
+        action: ElementWidgetActions.HangupCall,
+        data: { wait_for_leave: true },
+        requestId,
+      }));
+      for (const request of requests) {
+        widget.lazyActions.emit(
+          ElementWidgetActions.HangupCall,
+          new CustomEvent(ElementWidgetActions.HangupCall, { detail: request }),
+        );
+      }
+      expect(transport.reply).not.toHaveBeenCalled();
+      departure.resolve(true);
+      await Promise.all(pending);
+      expect(transport.reply).toHaveBeenNthCalledWith(1, requests[0], {
+        left: true,
+      });
+      expect(transport.reply).toHaveBeenNthCalledWith(2, requests[1], {
+        left: true,
+      });
     });
 
     test("stops listening once unsubscribed", () => {

@@ -95,7 +95,7 @@ async function start(
     );
     buttons.leave.hidden = false;
     buttons.leave.onclick = (): void => {
-      rtcParticipation.leave();
+      void rtcParticipation.leave();
       scope.end();
       members.replaceChildren();
       messages.replaceChildren();

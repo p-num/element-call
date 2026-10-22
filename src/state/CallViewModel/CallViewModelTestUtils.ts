@@ -76,6 +76,7 @@ export interface CallViewModelInputs {
   roomMembers: RoomMember[];
   /** Whether the local transport is connected. */
   connected$: Behavior<boolean>;
+  participationState$?: Behavior<ParticipationState>;
   speaking: Map<Participant, Behavior<boolean>>;
   videoEnabled: Map<Participant, Behavior<boolean>>;
   sharingScreen: Map<Participant, Behavior<boolean>>;
@@ -101,6 +102,7 @@ export function withCallViewModel(mode: MatrixRTCMode) {
         daveRTL,
       ],
       connected$ = constant(true),
+      participationState$,
       speaking = new Map(),
       videoEnabled = new Map(),
       sharingScreen = new Map(),
@@ -243,15 +245,17 @@ export function withCallViewModel(mode: MatrixRTCMode) {
     const rtcParticipation = mockRTCParticipation(scope, {
       localMember$,
       remoteMembers$,
-      state$: scope.behavior(
-        connected$.pipe(
-          map((connected): ParticipationState =>
-            connected
-              ? { kind: "connected" }
-              : { kind: "reconnecting", reason: "media" },
+      state$:
+        participationState$ ??
+        scope.behavior(
+          connected$.pipe(
+            map((connected): ParticipationState =>
+              connected
+                ? { kind: "connected" }
+                : { kind: "reconnecting", reason: "media" },
+            ),
           ),
         ),
-      ),
     });
     const muteStates = mockMuteStates();
     const raisedHands$ = new BehaviorSubject<Record<string, RaisedHandInfo>>(

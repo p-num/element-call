@@ -11,6 +11,7 @@ import { logger } from "matrix-js-sdk/lib/logger";
 import { BehaviorSubject, type Observable, Subject, throwError } from "rxjs";
 
 import { defaultSessionTimings } from "../config";
+import { type ObservableScope } from "../reactive/ObservableScope";
 import { MatrixRTCError } from "../errors";
 import { type HomeserverConnected } from "./HomeserverConnected";
 import {
@@ -34,9 +35,94 @@ describe("createLocalMembership$", () => {
     homeserver.disconnectReason$.next(null);
     expect(membership.state$.value).toEqual({ kind: "joined" });
 
-    membership.leave();
+    void membership.leave();
     await flushPromises();
     expect(membership.state$.value).toEqual({ kind: "left" });
+  });
+
+  it("shares delayed departure and retains the original failed result", async () => {
+    const { membership, prepared$, leave } = setup();
+    const result = Promise.withResolvers<boolean>();
+    leave.mockReturnValue(result.promise);
+    prepared$.next({ transport, canDelegateDelayedLeave: false });
+    await flushPromises();
+    const first = membership.leave();
+    const second = membership.leave();
+    expect(membership.state$.value).toEqual({ kind: "left" });
+    let settled = false;
+    void first.then(() => {
+      settled = true;
+    });
+    await flushPromises();
+    expect(settled).toBe(false);
+    expect(leave).toHaveBeenCalledExactlyOnceWith(10_000);
+    result.resolve(false);
+    expect(await Promise.all([first, second])).toEqual([false, false]);
+    expect(await membership.leave()).toBe(false);
+    expect(leave).toHaveBeenCalledOnce();
+  });
+
+  it.each(["during", "before", "immediately"])(
+    "rejects SDK success after a membership worker error %s departure",
+    async (when) => {
+      const { membership, prepared$, leave, membershipManagerError$, scope } =
+        setup();
+      const result = Promise.withResolvers<boolean>();
+      leave.mockReturnValue(result.promise);
+      prepared$.next({ transport, canDelegateDelayedLeave: false });
+      await flushPromises();
+      if (when === "before")
+        membershipManagerError$.next(new Error("worker failed"));
+      const pending = membership.leave();
+      scope.end();
+      if (when === "immediately")
+        membershipManagerError$.next(new Error("worker failed"));
+      await flushPromises();
+      if (when === "during")
+        membershipManagerError$.next(new Error("worker failed"));
+      result.resolve(true);
+      expect(await pending).toBe(false);
+      expect(membershipManagerError$.observed).toBe(false);
+    },
+  );
+
+  it("bounds an unresponsive SDK and releases its error observer", async () => {
+    const { membership, prepared$, leave, membershipManagerError$, scope } =
+      setup();
+    leave.mockReturnValue(new Promise<boolean>(() => {}));
+    prepared$.next({ transport, canDelegateDelayedLeave: false });
+    await flushPromises();
+    vi.useFakeTimers();
+    try {
+      const pending = membership.leave();
+      scope.end();
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(await pending).toBe(false);
+      expect(membershipManagerError$.observed).toBe(false);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.clearAllTimers();
+      vi.useRealTimers();
+    }
+  });
+
+  it("retains SDK rejection as an unconfirmed departure", async () => {
+    const { membership, prepared$, leave } = setup();
+    leave.mockRejectedValue(new Error("offline"));
+    prepared$.next({ transport, canDelegateDelayedLeave: false });
+    await flushPromises();
+    expect(await membership.leave()).toBe(false);
+    expect(await membership.leave()).toBe(false);
+    expect(leave).toHaveBeenCalledOnce();
+  });
+
+  it("can finish before transport discovery without entering later", async () => {
+    const { membership, prepared$, leave, joinMatrixRTC } = setup();
+    expect(await membership.leave()).toBe(true);
+    prepared$.next({ transport, canDelegateDelayedLeave: false });
+    await flushPromises();
+    expect(joinMatrixRTC).not.toHaveBeenCalled();
+    expect(leave).not.toHaveBeenCalled();
   });
 
   it("reconnects only after it was joined once", () => {
@@ -108,7 +194,7 @@ describe("createLocalMembership$", () => {
 
   it("is left after a failure once leave() is called", () => {
     const { membership } = setup(throwError(() => new MatrixRTCError("x")));
-    membership.leave();
+    void membership.leave();
     expect(membership.state$.value).toEqual({ kind: "left" });
   });
 });
@@ -121,6 +207,8 @@ function setup(preparedTransportWithErrors$?: Observable<PreparedTransport>): {
   membershipManagerError$: Subject<unknown>;
   joinMatrixRTC: ReturnType<typeof vi.fn>;
   delegate: ReturnType<typeof vi.fn>;
+  leave: ReturnType<typeof vi.fn<() => Promise<boolean>>>;
+  scope: ObservableScope;
 } {
   const prepared$ = new Subject<PreparedTransport>();
   const homeserver = fakeHomeserverConnected();
@@ -128,16 +216,16 @@ function setup(preparedTransportWithErrors$?: Observable<PreparedTransport>): {
   const membershipManagerError$ = new Subject<unknown>();
   const joinMatrixRTC = vi.fn();
   const delegate = vi.fn(async () => Promise.resolve());
+  const scope = testScope();
+  const leave = vi.fn<() => Promise<boolean>>().mockResolvedValue(true);
   const membership = createLocalMembership$({
-    scope: testScope(),
+    scope,
     delegateDelayedLeave: delegate,
     preparedTransport$: preparedTransportWithErrors$ ?? prepared$,
     homeserverConnected: homeserver,
     joinMatrixRTC,
     membershipManagerError$,
-    matrixRTCSession: {
-      leave: vi.fn(async () => Promise.resolve(true)),
-    },
+    matrixRTCSession: { leave },
     delayId$,
     timings: defaultSessionTimings,
     logger,
@@ -150,6 +238,8 @@ function setup(preparedTransportWithErrors$?: Observable<PreparedTransport>): {
     membershipManagerError$,
     joinMatrixRTC,
     delegate,
+    leave,
+    scope,
   };
 }
 

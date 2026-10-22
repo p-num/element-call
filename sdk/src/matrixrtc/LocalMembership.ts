@@ -75,7 +75,7 @@ interface Props {
 
 export interface LocalMembership {
   /** Sends the leave. Final: there is no joining again. */
-  leave: () => void;
+  leave: () => Promise<boolean>;
   state$: Behavior<MembershipState>;
 }
 
@@ -111,12 +111,28 @@ export function createLocalMembership$({
 
   const joined$ = new BehaviorSubject(true);
   const matrixError$ = new BehaviorSubject<MatrixRTCError | null>(null);
+  let entered = false;
+  let leaveResult: Promise<boolean> | undefined;
+  const leaveSession = async (): Promise<boolean> => {
+    leaveResult ??= entered
+      ? confirmedLeave(
+          matrixRTCSession,
+          membershipManagerError$,
+          matrixError$.value !== null,
+        )
+      : Promise.resolve(true);
+    return leaveResult;
+  };
+  scope.onEnd(() => {
+    void leaveSession();
+  });
 
   scope.reconcile(
     scope.behavior(combineLatest([transport$, joined$])),
     async ([prepared, joined]) => {
       if (prepared === null || !joined) return;
       try {
+        entered = true;
         joinMatrixRTC(
           prepared.transport,
           prepared.canDelegateDelayedLeave
@@ -128,11 +144,7 @@ export function createLocalMembership$({
         if (matrixError$.value === null) matrixError$.next(toMatrixRTCError(e));
       }
       return Promise.resolve(async (): Promise<void> => {
-        try {
-          await matrixRTCSession.leave(1000);
-        } catch (e) {
-          logger.error("Failed to leave the session", e);
-        }
+        await leaveSession();
       });
     },
   );
@@ -182,7 +194,10 @@ export function createLocalMembership$({
   );
 
   return {
-    leave: () => joined$.next(false),
+    leave: async () => {
+      joined$.next(false);
+      return leaveSession();
+    },
     state$,
   };
 }
@@ -207,4 +222,31 @@ function membershipState(
   const wasJoined =
     previous.kind === "joined" || previous.kind === "reconnecting";
   return wasJoined ? { kind: "reconnecting", reason } : { kind: "joining" };
+}
+
+/** The legacy SDK can resolve true after its worker has failed. */
+async function confirmedLeave(
+  session: Pick<JsSdkRTCSession, "leave">,
+  membershipManagerError$: Observable<unknown>,
+  failed: boolean,
+): Promise<boolean> {
+  const errors = membershipManagerError$.subscribe(() => {
+    failed = true;
+  });
+  let deadline: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const left = await Promise.race([
+      // Teardown stops local media before the network leave starts.
+      Promise.resolve().then(async () => session.leave(10_000)),
+      new Promise<false>((resolve) => {
+        deadline = setTimeout(() => resolve(false), 10_000);
+      }),
+    ]);
+    return left && !failed;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(deadline);
+    errors.unsubscribe();
+  }
 }

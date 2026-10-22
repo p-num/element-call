@@ -231,7 +231,7 @@ describe("createRTCParticipation", () => {
     await flushPromises();
     expect(fake.setPublishing).toHaveBeenLastCalledWith(true);
 
-    participation.leave();
+    void participation.leave();
     expect(fake.setPublishing).toHaveBeenLastCalledWith(false);
     expect(participation.state$.value).toEqual({ kind: "left" });
     await flushPromises();
@@ -383,13 +383,35 @@ describe("createRTCParticipation", () => {
     scope.end();
   });
 
+  it("stops publishing before departure and shares its result after teardown", async () => {
+    const { participation, session, fake, scope } = setup();
+    fake.prepared.resolve({ canDelegateDelayedLeave: false });
+    await flushPromises();
+    const result = Promise.withResolvers<boolean>();
+    const ended = vi.fn();
+    scope.onEnd(ended);
+    session.leave.mockImplementation(async () => {
+      expect(fake.setPublishing).toHaveBeenLastCalledWith(false);
+      expect(ended).toHaveBeenCalledOnce();
+      return result.promise;
+    });
+    const first = participation.leave();
+    const second = participation.leave();
+    expect(participation.state$.value).toEqual({ kind: "left" });
+    await flushPromises();
+    result.resolve(false);
+    expect(await Promise.all([first, second])).toEqual([false, false]);
+    expect(await participation.leave()).toBe(false);
+    expect(session.leave).toHaveBeenCalledOnce();
+  });
+
   it("leaves at most once", async () => {
     const { participation, session, fake } = setup();
     fake.prepared.resolve({ canDelegateDelayedLeave: false });
     await flushPromises();
 
-    participation.leave();
-    participation.leave();
+    void participation.leave();
+    void participation.leave();
     await flushPromises();
 
     expect(session.leave).toHaveBeenCalledOnce();
