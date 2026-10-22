@@ -12,7 +12,8 @@ export async function waitForCallCleanup(
   operations: readonly (Promise<unknown> | undefined)[],
   expectedDurationMs = 0,
 ): Promise<void> {
-  const completion = Promise.allSettled(operations).then((results) => {
+  const pending = operations.filter((operation) => operation !== undefined);
+  const completion = Promise.allSettled(pending).then((results) => {
     for (const result of results) {
       if (result.status === "rejected")
         logger.warn("Optional call cleanup failed", result.reason);
