@@ -87,19 +87,21 @@ describe("createLocalMembership$", () => {
   );
 
   it("bounds an unresponsive SDK and releases its error observer", async () => {
+    const { membership, prepared$, leave, membershipManagerError$, scope } =
+      setup();
+    leave.mockReturnValue(new Promise<boolean>(() => {}));
+    prepared$.next({ transport, canDelegateDelayedLeave: false });
+    await flushPromises();
     vi.useFakeTimers();
     try {
-      const { membership, prepared$, leave, membershipManagerError$, scope } =
-        setup();
-      leave.mockReturnValue(new Promise<boolean>(() => {}));
-      prepared$.next({ transport, canDelegateDelayedLeave: false });
-      await flushPromises();
       const pending = membership.leave();
       scope.end();
       await vi.advanceTimersByTimeAsync(10_000);
       expect(await pending).toBe(false);
       expect(membershipManagerError$.observed).toBe(false);
+      expect(vi.getTimerCount()).toBe(0);
     } finally {
+      vi.clearAllTimers();
       vi.useRealTimers();
     }
   });

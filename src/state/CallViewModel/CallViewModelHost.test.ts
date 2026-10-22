@@ -7,6 +7,7 @@ Please see LICENSE in the repository root for full details.
 
 import { describe, expect, it, vi } from "vitest";
 import { BehaviorSubject, Subject } from "rxjs";
+import { type ParticipationState } from "@element-hq/matrixrtc-sdk";
 
 import { MatrixRTCMode } from "../../config/ConfigOptions";
 import {
@@ -74,19 +75,21 @@ describe("call view model host integration", () => {
   );
 
   it("does not confuse a join notification with actual local connection", async () => {
-    const connected$ = new BehaviorSubject(false);
+    const participationState$ = new BehaviorSubject<ParticipationState>({
+      kind: "connecting",
+    });
     const notifyJoined = vi.fn().mockResolvedValue(undefined);
     const notifyConnectionState = vi.fn().mockResolvedValue(undefined);
-    withViewModel({ connected$ }, () => {}, {
+    withViewModel({ participationState$ }, () => {}, {
       hostBridge: { ...nullHostBridge, notifyJoined, notifyConnectionState },
     });
     expect(notifyJoined).toHaveBeenCalledOnce();
     expect(notifyConnectionState).toHaveBeenCalledExactlyOnceWith({
       connected: false,
     });
-    connected$.next(true);
-    connected$.next(true);
-    connected$.next(false);
+    participationState$.next({ kind: "connected" });
+    participationState$.next({ kind: "connected" });
+    participationState$.next({ kind: "reconnecting", reason: "media" });
     await flushPromises();
     expect(notifyConnectionState.mock.calls).toEqual([
       [{ connected: false }],
