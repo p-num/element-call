@@ -58,7 +58,14 @@ export function joinJsSdkSession(
     timings.syncDisconnectGracePeriodMs,
     delayedLeave.delay_ms,
   );
-  session.join(ownMembershipIdentity, [transport], {
+  // Native clients still require the room alias in legacy call-member events.
+  const publishedTransport =
+    matrixRTCMode === MatrixRTCMode.Compatibility &&
+    transport.type === "livekit" &&
+    typeof transport.livekit_service_url === "string"
+      ? { ...transport, livekit_alias: session.room.roomId }
+      : transport;
+  session.join(ownMembershipIdentity, [publishedTransport], {
     notificationType: sendNotificationType,
     callIntent,
     applicationData: rest,

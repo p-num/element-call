@@ -201,7 +201,7 @@ describe("createRTCParticipation", () => {
     await flushPromises();
     expect(join).toHaveBeenCalledWith(
       { userId, deviceId, memberId: legacyMemberId },
-      [transport],
+      [{ ...transport, livekit_alias: "!room:example.org" }],
       expect.objectContaining({
         manageMediaKeys: true,
         unstableSendStickyEvents: false,
@@ -271,7 +271,7 @@ describe("createRTCParticipation", () => {
     await flushPromises();
     expect(join).toHaveBeenCalledWith(
       expect.anything(),
-      [transport],
+      [{ ...transport, livekit_alias: "!room:example.org" }],
       expect.objectContaining({ delayedLeaveEventDelayMs: 7_200_000 }),
     );
     expect(fake.delegateDelayedLeave).not.toHaveBeenCalled();

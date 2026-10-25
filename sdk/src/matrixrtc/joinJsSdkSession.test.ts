@@ -12,7 +12,7 @@ import {
 import { describe, expect, it, type Mock, vi } from "vitest";
 
 import { defaultSessionTimings, MatrixRTCMode } from "../config";
-import { ownMemberMock } from "../utils/test";
+import { mockMatrixRoom, ownMemberMock } from "../utils/test";
 import { joinJsSdkSession } from "./joinJsSdkSession";
 
 const transport: Transport = {
@@ -24,7 +24,10 @@ const transport: Transport = {
 function session(): MatrixRTCSession & {
   join: Mock<MatrixRTCSession["join"]>;
 } {
-  return { join: vi.fn() } as unknown as MatrixRTCSession & {
+  return {
+    room: mockMatrixRoom({ roomId: "!call:example.org" }),
+    join: vi.fn(),
+  } as unknown as MatrixRTCSession & {
     join: Mock<MatrixRTCSession["join"]>;
   };
 }
@@ -51,22 +54,31 @@ describe("joinJsSdkSession", () => {
       },
     });
 
-    expect(s.join).toHaveBeenCalledWith(ownMemberMock, [transport], {
-      notificationType: "ring",
-      callIntent: undefined,
-      applicationData: {},
-      manageMediaKeys: true,
-      delayedLeaveEventRestartMs: 300_000,
-      delayedLeaveEventDelayMs: 3_600_000,
-      delayedLeaveEventRestartLocalTimeoutMs: 5_000,
-      networkErrorRetryMs: 1_000,
-      makeKeyDelay: 500,
-      membershipEventExpiryMs: 60_000,
-      keyRotationParticipantLimit: 20,
-      unstableSendStickyEvents: false,
-      // The sync grace period is the shorter wait: 10 s at 1 s per retry, plus one
-      maximumNetworkErrorRetryCount: 11,
-    });
+    expect(s.join).toHaveBeenCalledWith(
+      ownMemberMock,
+      [
+        {
+          ...transport,
+          livekit_alias: s.room.roomId,
+        },
+      ],
+      {
+        notificationType: "ring",
+        callIntent: undefined,
+        applicationData: {},
+        manageMediaKeys: true,
+        delayedLeaveEventRestartMs: 300_000,
+        delayedLeaveEventDelayMs: 3_600_000,
+        delayedLeaveEventRestartLocalTimeoutMs: 5_000,
+        networkErrorRetryMs: 1_000,
+        makeKeyDelay: 500,
+        membershipEventExpiryMs: 60_000,
+        keyRotationParticipantLimit: 20,
+        unstableSendStickyEvents: false,
+        // The sync grace period is the shorter wait: 10 s at 1 s per retry, plus one
+        maximumNetworkErrorRetryCount: 11,
+      },
+    );
   });
 
   it("gives up on the network once the delayed leave has probably been sent", () => {
@@ -81,7 +93,7 @@ describe("joinJsSdkSession", () => {
 
     expect(s.join).toHaveBeenCalledWith(
       ownMemberMock,
-      [transport],
+      [{ ...transport, livekit_alias: s.room.roomId }],
       expect.objectContaining({
         manageMediaKeys: false,
         maximumNetworkErrorRetryCount: 4,
@@ -108,6 +120,39 @@ describe("joinJsSdkSession", () => {
         applicationData: { custom: 1 },
         unstableSendStickyEvents: true,
       }),
+    );
+  });
+
+  it("does not mutate the discovered transport when publishing legacy membership", () => {
+    const s = session();
+    const discovered = Object.freeze({ ...transport });
+    joinJsSdkSession(s, ownMemberMock, discovered, {
+      encryptMedia: true,
+      matrixRTCMode: MatrixRTCMode.Compatibility,
+      timings: defaultSessionTimings,
+      delayedLeave: defaultSessionTimings.delayedLeave,
+    });
+    expect(discovered).not.toHaveProperty("livekit_alias");
+    expect(s.join).toHaveBeenCalledWith(
+      ownMemberMock,
+      [{ ...transport, livekit_alias: s.room.roomId }],
+      expect.anything(),
+    );
+  });
+
+  it("leaves the homeserver transport unchanged when it has no legacy LiveKit service", () => {
+    const s = session();
+    const modern: Transport = { type: "livekit", url: "wss://lk.example.org" };
+    joinJsSdkSession(s, ownMemberMock, modern, {
+      encryptMedia: true,
+      matrixRTCMode: MatrixRTCMode.Compatibility,
+      timings: defaultSessionTimings,
+      delayedLeave: defaultSessionTimings.delayedLeave,
+    });
+    expect(s.join).toHaveBeenCalledWith(
+      ownMemberMock,
+      [modern],
+      expect.anything(),
     );
   });
 });
