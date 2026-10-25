@@ -38,6 +38,15 @@ describe("transportId", () => {
       transportId({ ...sfu, livekit_service_url: "https://other" }),
     );
   });
+
+  it("ignores the legacy LiveKit membership alias without ignoring other transport fields", () => {
+    expect(transportId({ ...sfu, livekit_alias: "!room:example.org" })).toBe(
+      transportId(sfu),
+    );
+    expect(transportId({ type: "custom", livekit_alias: "one" })).not.toBe(
+      transportId({ type: "custom", livekit_alias: "two" }),
+    );
+  });
 });
 
 describe("createTransportRegistry", () => {
@@ -67,5 +76,20 @@ describe("createTransportRegistry", () => {
       { transport: sfu, state: MediaConnectionState.Connected, resolved },
     ]);
     expect(registry.connected$.value).toEqual([metadata]);
+  });
+
+  it("resolves legacy membership metadata against the unmodified discovered connection", () => {
+    const connections$ = new BehaviorSubject<BackendConnection[]>([]);
+    const registry = createTransportRegistry(testScope(), connections$);
+    const membership = registry.get({
+      ...sfu,
+      livekit_alias: "!room:example.org",
+    });
+    connections$.next([
+      { transport: sfu, state: MediaConnectionState.Connected, resolved },
+    ]);
+    expect(registry.get(sfu)).toBe(membership);
+    expect(registry.connected$.value).toEqual([membership]);
+    expect(membership.resolved$.value).toBe(resolved);
   });
 });

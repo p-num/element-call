@@ -78,8 +78,12 @@ function createTransportMetadata(
 /**
  * Transports are plain JSON out of membership events, so the same transport
  * serialises the same way wherever it appears. Keys are sorted so that the
- * order a sender wrote them in does not matter.
+ * order a sender wrote them in does not matter. The legacy LiveKit alias is
+ * membership metadata; media authentication already receives the room ID.
  */
 export function transportId(raw: Transport): string {
-  return JSON.stringify(raw, Object.keys(raw).sort());
+  const keys = Object.keys(raw).filter(
+    (key) => raw.type !== "livekit" || key !== "livekit_alias",
+  );
+  return JSON.stringify(raw, keys.sort());
 }
