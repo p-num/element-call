@@ -11,11 +11,14 @@ import {
   describe,
   expect,
   it,
+  type MockInstance,
   type MockedObject,
   onTestFinished,
   vi,
 } from "vitest";
 import {
+  ConnectionError,
+  ConnectionErrorReason,
   type LocalParticipant,
   type RemoteParticipant,
   type RemoteTrack,
@@ -27,6 +30,7 @@ import {
 } from "livekit-client";
 import fetchMock from "fetch-mock";
 import EventEmitter from "events";
+import { BehaviorSubject } from "rxjs";
 import { MatrixError } from "matrix-js-sdk";
 import { logger, type Logger } from "matrix-js-sdk/lib/logger";
 import {
@@ -39,9 +43,15 @@ import {
   type ConnectionState,
   type ConnectionOpts,
 } from "./Connection.ts";
-import { ObservableScope } from "../../reactive/ObservableScope";
-import { type ClientGetTokenParts, type ClientOpenIDParts } from "./auth";
-import { MatrixRTCError } from "../../errors";
+import { Epoch, ObservableScope } from "../../reactive/ObservableScope";
+import { createConnectionMap$, keyFor } from "./ConnectionMap";
+import { type ConnectionFactory } from "./ConnectionFactory";
+import {
+  type ClientGetTokenParts,
+  type ClientOpenIDParts,
+  type TransportLocator,
+} from "./auth";
+import { LivekitConnectionError, MatrixRTCError } from "../../errors";
 import { testJWTToken } from "../../utils/test-fixtures";
 import { ownMemberMock } from "../../utils/test";
 import { mockRemoteParticipant } from "./test";
@@ -109,25 +119,7 @@ function setupTest(): void {
     ),
   } as unknown as LocalParticipant);
 
-  const fakeRoomEventEmitter = new EventEmitter();
-  fakeLivekitRoom = vi.mocked<LivekitRoom>({
-    connect: vi.fn(),
-    disconnect: vi.fn(),
-    remoteParticipants: new Map(),
-    localParticipant: fakeLocalParticipant,
-    state: LivekitConnectionState.Disconnected,
-    on: fakeRoomEventEmitter.on.bind(fakeRoomEventEmitter),
-    off: fakeRoomEventEmitter.off.bind(fakeRoomEventEmitter),
-    addListener: fakeRoomEventEmitter.addListener.bind(fakeRoomEventEmitter),
-    removeListener:
-      fakeRoomEventEmitter.removeListener.bind(fakeRoomEventEmitter),
-    removeAllListeners:
-      fakeRoomEventEmitter.removeAllListeners.bind(fakeRoomEventEmitter),
-    setE2EEEnabled: vi.fn().mockResolvedValue(undefined),
-    emit: (eventName: string | symbol, ...args: unknown[]) => {
-      fakeRoomEventEmitter.emit(eventName, ...args);
-    },
-  } as unknown as LivekitRoom);
+  fakeLivekitRoom = makeLivekitRoom();
 }
 
 function setupRemoteConnection(): Connection {
@@ -401,6 +393,163 @@ describe("Start connection states", () => {
     await expect(started).resolves.toBeUndefined();
     expect(capturedStates.at(-1)).toEqual({ state: "stopped" });
     expect(capturedStates.some((st) => st.state === "error")).toBe(false);
+  });
+
+  it.each([true, false])(
+    "only ignores typed cancellation after an explicit stop: %s",
+    async (explicitStop) => {
+      setupTest();
+      const connection = setupRemoteConnection();
+      const pending = Promise.withResolvers<void>();
+      fakeLivekitRoom.connect.mockReturnValue(pending.promise);
+      const cancellation = ConnectionError.cancelled(
+        "Client initiated disconnect",
+      );
+      expect(cancellation.reason).toBe(ConnectionErrorReason.Cancelled);
+      expect(cancellation.reason).toBe(3);
+      expect(cancellation.code).toBe(1);
+      const states: ConnectionState[] = [];
+      const subscription = connection.state$.subscribe((state) =>
+        states.push(state),
+      );
+      onTestFinished(() => subscription.unsubscribe());
+      const started = connection.start();
+      await vi.waitFor(() =>
+        expect(fakeLivekitRoom.connect).toHaveBeenCalled(),
+      );
+
+      if (explicitStop) {
+        fakeLivekitRoom.disconnect.mockImplementation(async () => {
+          pending.reject(cancellation);
+          return Promise.resolve();
+        });
+        const stopping = connection.stop();
+        await expect(started).resolves.toBeUndefined();
+        await stopping;
+        expect(states.at(-1)).toEqual({ state: "stopped" });
+        expect(states.some((state) => state.state === "error")).toBe(false);
+      } else {
+        pending.reject(cancellation);
+        await expect(started).rejects.toBeInstanceOf(LivekitConnectionError);
+        expect(connection.state$.getValue()).toEqual({
+          state: "error",
+          error: expect.objectContaining({ cause: cancellation }),
+        });
+      }
+    },
+  );
+
+  it("replaces a pending real connection without failing its successor", async () => {
+    setupTest();
+    onTestFinished(() => testScope.end());
+    const local: TransportLocator = { transport, serverName: "m.localhost" };
+    const old: TransportLocator = {
+      transport: { type: "livekit", url: "wss://old.example.org" },
+      serverName: "m.localhost",
+    };
+    const replacement: TransportLocator = {
+      transport: { type: "livekit", url: "wss://new.example.org" },
+      serverName: "m.localhost",
+    };
+    const oldRoom = makeLivekitRoom();
+    const replacementRoom = makeLivekitRoom();
+    const pending = Promise.withResolvers<void>();
+    oldRoom.connect.mockReturnValue(pending.promise);
+    oldRoom.disconnect.mockImplementation(async () => {
+      pending.reject(ConnectionError.cancelled("Client initiated disconnect"));
+      return Promise.resolve();
+    });
+    for (const room of [fakeLivekitRoom, replacementRoom]) {
+      room.connect.mockImplementation(async () => {
+        room.state = LivekitConnectionState.Connected;
+        room.emit(RoomEvent.ConnectionStateChanged, room.state);
+        return Promise.resolve();
+      });
+    }
+    const rooms = new Map([
+      [keyFor(local), fakeLivekitRoom],
+      [keyFor(old), oldRoom],
+      [keyFor(replacement), replacementRoom],
+    ]);
+    const created = new Map<
+      string,
+      {
+        connection: Connection;
+        start: MockInstance<Connection["start"]>;
+        states: ConnectionState[];
+      }
+    >();
+    const factory: ConnectionFactory = {
+      createConnection(
+        scope,
+        role,
+        currentTransport,
+        serverName,
+        ownMembershipIdentity,
+        connectionLogger,
+      ) {
+        const key = keyFor({ transport: currentTransport, serverName });
+        const room = rooms.get(key);
+        if (!room)
+          throw new Error("the test must provide a room for each transport");
+        const connection = new Connection(
+          {
+            ...connectionOpts(),
+            scope,
+            role,
+            transport: currentTransport,
+            serverName,
+            ownMembershipIdentity,
+            livekitRoomFactory: () => room,
+          },
+          connectionLogger,
+        );
+        const states: ConnectionState[] = [];
+        const subscription = connection.state$.subscribe((state) =>
+          states.push(state),
+        );
+        onTestFinished(() => subscription.unsubscribe());
+        created.set(key, {
+          connection,
+          start: vi.spyOn(connection, "start"),
+          states,
+        });
+        return connection;
+      },
+    };
+    const remoteTransports$ = new BehaviorSubject(new Epoch([old], 0));
+    const map$ = createConnectionMap$({
+      scope: testScope,
+      connectionFactory: factory,
+      localTransport: local,
+      remoteTransports$,
+      logger,
+      ownMembershipIdentity: ownMemberMock,
+    });
+    await vi.waitFor(() => expect(oldRoom.connect).toHaveBeenCalled());
+    const oldEntry = created.get(keyFor(old))!;
+    const oldCompletion = Promise.resolve(
+      oldEntry.start.mock.results[0].value,
+    ).catch((error: unknown) => error);
+    remoteTransports$.next(new Epoch([replacement], 1));
+    await expect(oldCompletion).resolves.toBeUndefined();
+    await vi.waitFor(() => expect(replacementRoom.connect).toHaveBeenCalled());
+    const newEntry = created.get(keyFor(replacement))!;
+    await expect(newEntry.start.mock.results[0].value).resolves.toBeUndefined();
+
+    expect(oldRoom.disconnect).toHaveBeenCalledTimes(1);
+    expect(oldEntry.states.at(-1)).toEqual({ state: "stopped" });
+    expect(oldEntry.states.some((state) => state.state === "error")).toBe(
+      false,
+    );
+    expect(newEntry.connection.state$.getValue()).toEqual({
+      state: "authenticated",
+      livekitState: LivekitConnectionState.Connected,
+    });
+    expect(map$.value.value.getConnections()).toEqual([
+      created.get(keyFor(local))!.connection,
+      newEntry.connection,
+    ]);
   });
 
   it("shutting down the scope should stop the connection", async () => {
@@ -711,3 +860,25 @@ describe("remote track logging", () => {
 //   });
 // });
 // });
+
+function makeLivekitRoom(): MockedObject<LivekitRoom> {
+  const fakeRoomEventEmitter = new EventEmitter();
+  return vi.mocked<LivekitRoom>({
+    connect: vi.fn(),
+    disconnect: vi.fn(),
+    remoteParticipants: new Map(),
+    localParticipant: fakeLocalParticipant,
+    state: LivekitConnectionState.Disconnected,
+    on: fakeRoomEventEmitter.on.bind(fakeRoomEventEmitter),
+    off: fakeRoomEventEmitter.off.bind(fakeRoomEventEmitter),
+    addListener: fakeRoomEventEmitter.addListener.bind(fakeRoomEventEmitter),
+    removeListener:
+      fakeRoomEventEmitter.removeListener.bind(fakeRoomEventEmitter),
+    removeAllListeners:
+      fakeRoomEventEmitter.removeAllListeners.bind(fakeRoomEventEmitter),
+    setE2EEEnabled: vi.fn().mockResolvedValue(undefined),
+    emit: (eventName: string | symbol, ...args: unknown[]) => {
+      fakeRoomEventEmitter.emit(eventName, ...args);
+    },
+  } as unknown as LivekitRoom);
+}
