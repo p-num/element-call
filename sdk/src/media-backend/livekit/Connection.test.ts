@@ -11,6 +11,7 @@ import {
   describe,
   expect,
   it,
+  type MockInstance,
   type MockedObject,
   onTestFinished,
   vi,
@@ -428,9 +429,8 @@ describe("Start connection states", () => {
         expect(states.at(-1)).toEqual({ state: "stopped" });
         expect(states.some((state) => state.state === "error")).toBe(false);
       } else {
-        const rejected = started.catch((error: unknown) => error);
         pending.reject(cancellation);
-        await expect(rejected).resolves.toBeInstanceOf(LivekitConnectionError);
+        await expect(started).rejects.toBeInstanceOf(LivekitConnectionError);
         expect(connection.state$.getValue()).toEqual({
           state: "error",
           error: expect.objectContaining({ cause: cancellation }),
@@ -475,7 +475,7 @@ describe("Start connection states", () => {
       string,
       {
         connection: Connection;
-        start: ReturnType<typeof vi.spyOn<Connection, "start">>;
+        start: MockInstance<Connection["start"]>;
         states: ConnectionState[];
       }
     >();
