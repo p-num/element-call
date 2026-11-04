@@ -292,7 +292,14 @@ export function mockMatrixRoomMember(
 }
 
 export function mockMatrixRoom(room: Partial<MatrixRoom>): MatrixRoom {
-  return { ...mockEmitter(), ...room } as Partial<MatrixRoom> as MatrixRoom;
+  return {
+    ...mockEmitter(),
+    isSpaceRoom: () => false,
+    getJoinedMemberCount: () => 0,
+    getInvitedMemberCount: () => 0,
+    getMembers: () => [],
+    ...room,
+  } as Partial<MatrixRoom> as MatrixRoom;
 }
 
 /**
