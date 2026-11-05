@@ -13,6 +13,7 @@ on:
 
 jobs:
   versioning:
+    if: github.repository == 'element-hq/element-call'
     name: Versioning
     runs-on: ubuntu-latest
     outputs:
@@ -74,7 +75,7 @@ jobs:
 
   publish_tarball:
     needs: [build_element_call, versioning]
-    if: always()
+    if: always() && github.repository == 'element-hq/element-call'
     name: Publish tarball
     runs-on: ubuntu-latest
     permissions:
@@ -105,7 +106,7 @@ jobs:
 
   publish_npm:
     needs: [build_element_call, versioning]
-    if: always()
+    if: always() && github.repository == 'element-hq/element-call'
     name: Publish NPM
     runs-on: ubuntu-latest
     outputs:
@@ -150,7 +151,7 @@ jobs:
 
   publish_android:
     needs: [build_element_call, versioning]
-    if: always()
+    if: always() && github.repository == 'element-hq/element-call'
     name: Publish Android AAR
     runs-on: ubuntu-latest
     outputs:
@@ -210,7 +211,7 @@ jobs:
 
   publish_ios:
     needs: [build_element_call, versioning]
-    if: always()
+    if: always() && github.repository == 'element-hq/element-call'
     name: Publish SwiftPM Library
     runs-on: ubuntu-latest
     outputs:
@@ -280,9 +281,14 @@ jobs:
 
   release_notes:
     needs: [versioning, publish_npm, publish_android, publish_ios]
-    if: always()
+    if: always() && github.repository == 'element-hq/element-call'
     name: Update release notes
     runs-on: ubuntu-latest
+    # Shared with publish-component.yaml, which appends to the same release: two appends
+    # at once would each write back the body without the other's section
+    concurrency:
+      group: release-notes-${{ github.event.release.tag_name || github.run_id }}
+      cancel-in-progress: false
     permissions:
       contents: write # to update release notes
     steps:

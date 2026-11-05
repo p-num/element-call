@@ -11,13 +11,12 @@ import { widgetTest } from "../fixtures/widget-user.ts";
 import { HOST1, TestHelpers } from "./test-helpers.ts";
 
 const sfuUrl = "wss://matrix-rtc.m.localhost/livekit/sfu";
-const serviceUrl = "https://matrix-rtc.m.localhost/livekit/jwt";
 
 /** Which endpoint a page asks for its SFU tokens. */
 type Flow = "cs-api" | "service-legacy" | "service-default";
 
 widgetTest(
-  "Call between a url + livekit_service_url transport and a legacy one",
+  "Call between a url transport and a legacy one",
   async ({ addUser, browserName }) => {
     test.skip(
       browserName === "firefox",
@@ -30,12 +29,10 @@ widgetTest(
       addUser("Pevara", HOST1),
     ]);
 
-    // The host's homeserver has started advertising a `url` next to its JWT
-    // service; the guest's still advertises the JWT service alone.
+    // Host advertises a url transport, guest still advertises a legacy one
     await advertiseTransport(host.page, {
       type: "livekit",
       url: sfuUrl,
-      livekit_service_url: serviceUrl,
     });
     // Element Web answers the widget from a cache it filled at login, so make
     // it fetch the transports again now that they are rerouted
@@ -66,13 +63,9 @@ widgetTest(
       await TestHelpers.expectVisibleVideoCount(frame, 2);
     }
 
-    // Element Web does not expose the MSC4195 endpoints to widgets yet, so
-    // neither side reached the CS API. The host published through the JWT
-    // service's legacy endpoint and subscribed to the guest through its
-    // default one; the guest published the same way and fell back to the
-    // default endpoint for the host's transport.
-    expect(hostFlows).toEqual(new Set(["service-legacy", "service-default"]));
-    expect(guestFlows).toEqual(new Set(["service-legacy", "service-default"]));
+    // Element Web used for Playwright does support MSC4195 for widgets.
+    expect(hostFlows).toEqual(new Set(["cs-api", "service-default"]));
+    expect(guestFlows).toEqual(new Set(["service-legacy", "cs-api"]));
   },
 );
 
