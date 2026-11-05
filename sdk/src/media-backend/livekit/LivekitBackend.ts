@@ -34,7 +34,7 @@ import {
   trackEpoch,
 } from "../../reactive/ObservableScope";
 import { mapScoped } from "../../utils/mapScoped";
-import { serverNameOf } from "../../utils/serverName";
+import { serverNameOf, serverNameOfTransport } from "../../utils/serverName";
 import {
   type BackendConnection,
   type MediaBackend,
@@ -60,7 +60,10 @@ import {
 import { toMediaConnectionState } from "./connectionState";
 import { createDataChannel$ } from "./DataChannel";
 import { createKeyProvider } from "./KeyProvider";
-import { createLivekitMemberMedia } from "./LivekitMemberMedia";
+import {
+  createLivekitMemberMedia,
+  participantSourcesEqual,
+} from "./LivekitMemberMedia";
 import { createLivekitLocalMedia } from "./LocalMedia";
 
 export interface LivekitBackendOptions {
@@ -146,26 +149,37 @@ export function createLivekitBackend(
     logger,
   );
 
+  const ownServerName = serverNameOf(ownMembershipIdentity.userId);
+
   const prepareLocalTransport = async (
     transport: Transport,
   ): Promise<TransportCapabilities> => {
     if (!isUnstableLivekitTransport(transport))
       throw new MatrixRTCError(`Not a LiveKit transport: ${transport.type}`);
-    const locator: TransportLocator = {
+    const serverName = serverNameOfTransport(
       transport,
-      serverName: serverNameOf(ownMembershipIdentity.userId),
-    };
-    // Delegation goes through whichever service authenticates us as a
-    // publisher, so only that service's support counts
-    const flow = chooseAuthFlow(transport, "publisher");
-    const canDelegate =
-      flow.kind === "openID"
-        ? supportsDelegation(
-            `${flow.serviceUrl}/delegate_delayed_leave`,
-            `transport ${flow.serviceUrl}`,
-            logger,
-          )
-        : homeserverSupportsDelegation;
+      ownMembershipIdentity.userId,
+    );
+    const locator: TransportLocator = { transport, serverName };
+    let canDelegate: Promise<boolean>;
+    if (serverName !== ownServerName) {
+      // Our homeserver only takes over leaves for its own SFUs
+      logger.info(
+        `Publishing on a remote SFU of ${serverName}, delegation is not possible`,
+      );
+      canDelegate = Promise.resolve(false);
+    } else {
+      // Check for support using the same auth flow that we intend to use later
+      const flow = chooseAuthFlow(transport);
+      canDelegate =
+        flow.kind === "openID"
+          ? supportsDelegation(
+              `${flow.serviceUrl}/delegate_delayed_leave`,
+              `transport ${flow.serviceUrl}`,
+              logger,
+            )
+          : homeserverSupportsDelegation;
+    }
     localTransport$.next(locator);
     // The membership is only sent once the publisher connection holds its
     // token, so that the LiveKit room exists before anyone subscribes to it:
@@ -204,7 +218,10 @@ export function createLivekitBackend(
         map((transport): TransportLocator | undefined => {
           const raw = transport?.raw;
           return isUnstableLivekitTransport(raw)
-            ? { transport: raw, serverName: serverNameOf(member.userId) }
+            ? {
+                transport: raw,
+                serverName: serverNameOfTransport(raw, member.userId),
+              }
             : undefined;
         }),
         distinctUntilChanged((a, b) => (a && keyFor(a)) === (b && keyFor(b))),
@@ -219,22 +236,28 @@ export function createLivekitBackend(
           const connection = connections.getConnectionForTransport(locator);
           // A member advertising both a `url` and a `livekit_service_url` may
           // have authenticated through either flow, under either identity
-          const participant = connections
+          const participants = connections
             .getParticipantsForTransport(locator)
-            .find((p) => backendIdentities.includes(p.identity));
-          return connection && participant
-            ? { participant, room: connection.livekitRoom }
+            .filter((p) => backendIdentities.includes(p.identity));
+          return connection && participants.length
+            ? { participants, room: connection.livekitRoom }
             : null;
         }),
-        distinctUntilChanged(
-          (a, b) => a?.participant === b?.participant && a?.room === b?.room,
-        ),
+        distinctUntilChanged(participantSourcesEqual),
       ),
     );
     source$.pipe(memberScope.bind()).subscribe((source) => {
-      logger.info(
-        `${member.rtcBackendIdentity}: LiveKit participant ${source ? `matched (${source.participant.sid})` : "missing"} on ${locator$.value ? JSON.stringify(locator$.value.transport) : "no transport"}`,
-      );
+      const transportString = locator$.value
+        ? JSON.stringify(locator$.value.transport)
+        : "no transport";
+      if (source)
+        logger.info(
+          `${member.rtcBackendIdentity}: ${source.participants.length} LiveKit participant(s) matched (${source.participants.map((p) => p.sid).join(", ")}) on ${transportString}`,
+        );
+      else
+        logger.info(
+          `${member.rtcBackendIdentity}: LiveKit participant missing on ${transportString}`,
+        );
     });
     return createLivekitMemberMedia(memberScope, source$, encryptionSystem);
   };
