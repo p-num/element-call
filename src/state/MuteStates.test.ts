@@ -53,7 +53,7 @@ describe("MuteState", () => {
       select(): void {},
     } as unknown as MediaDevice<DeviceLabel, SelectedDevice>;
     const mute = new MuteState(testScope, device, true, constant(false));
-    const handler = vi.fn(async () => false);
+    const handler = vi.fn(async () => Promise.resolve(false));
     mute.setHandler(handler);
     available$.next(new Map([["late", { type: "name", name: "Late device" }]]));
     await flushPromises();
@@ -70,7 +70,7 @@ describe("MuteState", () => {
       select(): void {},
     } as unknown as MediaDevice<DeviceLabel, SelectedDevice>;
     const mute = new MuteState(testScope, device, false, constant(false));
-    const handler = vi.fn(async (enabled: boolean) => enabled);
+    const handler = vi.fn(async (enabled: boolean) => Promise.resolve(enabled));
     mute.setHandler(handler);
     available$.next(new Map([["late", { type: "name", name: "Late camera" }]]));
     await flushPromises();
@@ -86,7 +86,7 @@ describe("MuteState", () => {
       select(): void {},
     } as unknown as MediaDevice<DeviceLabel, SelectedDevice>;
     const mute = new MuteState(testScope, device, true, constant(false));
-    const handler = vi.fn(async (enabled: boolean) => enabled);
+    const handler = vi.fn(async (enabled: boolean) => Promise.resolve(enabled));
     mute.setHandler(handler);
     available$.next(new Map([["late", { type: "name", name: "Late device" }]]));
     await flushPromises();
@@ -107,7 +107,7 @@ describe("MuteState", () => {
     } as unknown as MediaDevice<DeviceLabel, SelectedDevice>;
     const mute = new MuteState(testScope, device, true, constant(false));
     const publication = Promise.withResolvers<boolean>();
-    const handler = vi.fn(() => publication.promise);
+    const handler = vi.fn(async () => publication.promise);
     expect(mute.enabled$.value).toBe(false);
     mute.setHandler(handler);
 
