@@ -626,8 +626,13 @@ export function createCallViewModel$(
   });
 
   observeHostConnection(
-    rtcParticipation.state$.pipe(
-      map((state) => state.kind === "connected"),
+    combineLatest([rtcParticipation.state$, members$]).pipe(
+      map(
+        ([state, members]) =>
+          state.kind === "connected" &&
+          (!options.waitForCallPickup ||
+            members.some((member) => member.userId !== userId)),
+      ),
       scope.bind(),
     ),
     hostBridge.notifyConnectionState,
