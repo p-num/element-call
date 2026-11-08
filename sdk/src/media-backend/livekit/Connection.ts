@@ -302,9 +302,7 @@ export class Connection {
       this._state$.next({ state: "authenticating" });
       const { url, jwt, livekitAlias } = await this.getSFUConfig();
       this.logger.debug(
-        "Starting Connection - jwt: ",
-        jwt,
-        "wss: ",
+        "Starting Connection - wss: ",
         url,
         "livekitAlias: ",
         livekitAlias,

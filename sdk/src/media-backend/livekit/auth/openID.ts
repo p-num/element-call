@@ -76,7 +76,7 @@ export async function getSFUConfig({
       error instanceof Error ? error : new Error("Unknown error"),
     );
   }
-  logger.debug("Got openID token", openIdToken);
+  logger.debug("Got openID token");
 
   const delay: DelayParams =
     // Also check for empty string

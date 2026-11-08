@@ -367,6 +367,49 @@ describe("Start connection states", () => {
     expect(connection.livekitAlias).toBe("!example_room_id");
   });
 
+  it.each(["client-server", "legacy"])(
+    "does not log authentication credentials on the %s route",
+    async (route) => {
+      setupTest();
+      onTestFinished(() => testScope.end());
+      const log = vi.fn();
+      const testLogger = {
+        getChild: (): unknown => testLogger,
+        debug: log,
+        info: log,
+        warn: log,
+        error: log,
+      } as unknown as Logger;
+      const serviceUrl = "https://matrix-rtc.example.org/livekit/jwt";
+      fetchMock.post(`${serviceUrl}/sfu/get`, {
+        status: 200,
+        body: { url: "wss://sfu", jwt: testJWTToken },
+      });
+      fakeLivekitRoom.connect.mockResolvedValue(undefined);
+      const opts = connectionOpts();
+      const connection = new Connection(
+        route === "legacy"
+          ? {
+              ...opts,
+              role: "publisher",
+              transport: { type: "livekit", livekit_service_url: serviceUrl },
+            }
+          : opts,
+        testLogger,
+      );
+
+      await connection.start();
+
+      expect(fakeLivekitRoom.connect).toHaveBeenCalledWith(
+        expect.any(String),
+        testJWTToken,
+      );
+      const logged = JSON.stringify(log.mock.calls);
+      expect(logged).not.toContain(testJWTToken);
+      expect(logged).not.toContain("rYsmGUEwNjKgJYyeNUkZseJN");
+    },
+  );
+
   it("stopping while connecting does not report an error", async () => {
     setupTest();
     const connection = setupRemoteConnection();
