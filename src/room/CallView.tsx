@@ -577,7 +577,7 @@ const LoadedCallView: FC<LoadedProps> = ({
         // If there is an error we need to be dismissible again. This is done in
         // `onLeft` as well; we need it here explicitly in case
         // rtcSession.isJoined is false.
-        void hostBridge.setAlwaysOnScreen(false);
+        void waitForCallCleanup([hostBridge.setAlwaysOnScreen(false)]);
       }}
     >
       {body}

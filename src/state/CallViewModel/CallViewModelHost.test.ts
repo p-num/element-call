@@ -18,10 +18,47 @@ import {
 } from "../../HostBridge";
 import { flushPromises } from "../../utils/test";
 import { withCallViewModel } from "./CallViewModelTestUtils";
+import {
+  aliceRtcMember,
+  localRtcMember,
+  localRtcMemberDevice2,
+} from "../../utils/test-fixtures";
 
 const withViewModel = withCallViewModel(MatrixRTCMode.Compatibility);
 
 describe("call view model host integration", () => {
+  it.each(Object.values(MatrixRTCMode))(
+    "keeps an outgoing call pending until another person picks up in %s",
+    async (mode) => {
+      const rtcMembers$ = new BehaviorSubject([localRtcMember]);
+      const participationState$ = new BehaviorSubject<ParticipationState>({
+        kind: "connecting",
+      });
+      const notifyConnectionState = vi.fn().mockResolvedValue(undefined);
+      withCallViewModel(mode)({ rtcMembers$, participationState$ }, () => {}, {
+        waitForCallPickup: true,
+        hostBridge: { ...nullHostBridge, notifyConnectionState },
+      });
+      participationState$.next({ kind: "connected" });
+      rtcMembers$.next([localRtcMember, localRtcMemberDevice2]);
+      expect(notifyConnectionState.mock.calls).toEqual([
+        [{ connected: false }],
+      ]);
+      rtcMembers$.next([localRtcMember, aliceRtcMember]);
+      participationState$.next({ kind: "reconnecting", reason: "media" });
+      participationState$.next({ kind: "connected" });
+      rtcMembers$.next([localRtcMember]);
+      await flushPromises();
+      expect(notifyConnectionState.mock.calls).toEqual([
+        [{ connected: false }],
+        [{ connected: true }],
+        [{ connected: false }],
+        [{ connected: true }],
+        [{ connected: false }],
+      ]);
+    },
+  );
+
   it("keeps the call view alive until a correlated departure reply is delivered", async () => {
     const requests = new Subject<
       HostRequest<HangupRequest, HangupReply | void>

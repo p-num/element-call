@@ -38,6 +38,7 @@ import { useState } from "react";
 import { TooltipProvider } from "@vector-im/compound-web";
 import { Subject } from "rxjs";
 import { Room as LivekitRoom } from "livekit-client";
+import { logger } from "matrix-js-sdk/lib/logger";
 
 import { prefetchSounds } from "../soundUtils";
 import { useAudioContext } from "../useAudioContext";
@@ -434,6 +435,40 @@ test("falls back to ConnectionLostError for unrecognised membership manager erro
   );
 
   await screen.findByText("Connection lost");
+});
+
+test("keeps the call error visible when its disposed host rejects the screen hint", async () => {
+  const hostError = new Error("Not ready or unknown widget ID");
+  const close = vi.fn().mockResolvedValue(undefined);
+  const setAlwaysOnScreen = vi.fn().mockResolvedValue(undefined);
+  const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+  onTestFinished(() => {
+    warn.mockRestore();
+  });
+  const { rtcSession } = createCallView(
+    { ...nullHostBridge, setAlwaysOnScreen, close },
+    true,
+    { withErrorBoundary: true },
+  );
+  vi.spyOn(rtcSession, "isJoined").mockReturnValue(false);
+  setAlwaysOnScreen.mockRejectedValue(hostError);
+
+  await act(() =>
+    rtcSession.emit(
+      MatrixRTCSessionEvent.MembershipManagerError,
+      new Error("Transport stopped"),
+    ),
+  );
+
+  await screen.findByText("Connection lost");
+  await waitFor(() =>
+    expect(warn).toHaveBeenCalledWith(
+      "Optional call cleanup failed",
+      hostError,
+    ),
+  );
+  expect(setAlwaysOnScreen).toHaveBeenCalledWith(false);
+  expect(close).not.toHaveBeenCalled();
 });
 
 test("user can reconnect after a membership manager error", async () => {
