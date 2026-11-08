@@ -87,7 +87,12 @@ export class MuteState<Label, Selected> {
         }
 
         // Assume the default value only once devices are actually connected
-        let enabled = this.enabledByDefault;
+        // A running call must apply a newly discovered device through its
+        // media handler before the switch can claim that capture is enabled.
+        let enabled =
+          this.handler$.value === defaultHandler
+            ? this.enabledByDefault
+            : false;
         const set$ = new Subject<boolean>();
         const toggle$ = new Subject<void>();
         const syncing$ = new BehaviorSubject(false);
@@ -129,6 +134,9 @@ export class MuteState<Label, Selected> {
                 logger.error("MuteState: handler error", err);
               });
             }
+          });
+          sync().catch((err) => {
+            logger.error("MuteState: initial device handler error", err);
           });
           return (): void => {
             s.unsubscribe();

@@ -45,6 +45,84 @@ afterEach(() => {
 });
 
 describe("MuteState", () => {
+  test("keeps a late device muted when capture is refused", async () => {
+    const available$ = new BehaviorSubject(new Map<string, DeviceLabel>());
+    const device = {
+      available$,
+      selected$: constant({ id: "late" }),
+      select(): void {},
+    } as unknown as MediaDevice<DeviceLabel, SelectedDevice>;
+    const mute = new MuteState(testScope, device, true, constant(false));
+    const handler = vi.fn(async () => false);
+    mute.setHandler(handler);
+    available$.next(new Map([["late", { type: "name", name: "Late device" }]]));
+    await flushPromises();
+    expect(handler).toHaveBeenCalledExactlyOnceWith(true);
+    expect(mute.enabled$.value).toBe(false);
+    expect(mute.syncing$.value).toBe(false);
+  });
+
+  test("does not enable a late camera when the call starts with video muted", async () => {
+    const available$ = new BehaviorSubject(new Map<string, DeviceLabel>());
+    const device = {
+      available$,
+      selected$: constant({ id: "late" }),
+      select(): void {},
+    } as unknown as MediaDevice<DeviceLabel, SelectedDevice>;
+    const mute = new MuteState(testScope, device, false, constant(false));
+    const handler = vi.fn(async (enabled: boolean) => enabled);
+    mute.setHandler(handler);
+    available$.next(new Map([["late", { type: "name", name: "Late camera" }]]));
+    await flushPromises();
+    expect(handler).not.toHaveBeenCalled();
+    expect(mute.enabled$.value).toBe(false);
+  });
+
+  test("does not recapture when the available input list changes", async () => {
+    const available$ = new BehaviorSubject(new Map<string, DeviceLabel>());
+    const device = {
+      available$,
+      selected$: constant({ id: "late" }),
+      select(): void {},
+    } as unknown as MediaDevice<DeviceLabel, SelectedDevice>;
+    const mute = new MuteState(testScope, device, true, constant(false));
+    const handler = vi.fn(async (enabled: boolean) => enabled);
+    mute.setHandler(handler);
+    available$.next(new Map([["late", { type: "name", name: "Late device" }]]));
+    await flushPromises();
+    available$.next(
+      new Map([["late", { type: "name", name: "Renamed device" }]]),
+    );
+    await flushPromises();
+    expect(handler).toHaveBeenCalledExactlyOnceWith(true);
+    expect(mute.enabled$.value).toBe(true);
+  });
+
+  test("publishes a late-discovered device through the installed handler", async () => {
+    const available$ = new BehaviorSubject(new Map<string, DeviceLabel>());
+    const device = {
+      available$,
+      selected$: constant({ id: "late" }),
+      select(): void {},
+    } as unknown as MediaDevice<DeviceLabel, SelectedDevice>;
+    const mute = new MuteState(testScope, device, true, constant(false));
+    const publication = Promise.withResolvers<boolean>();
+    const handler = vi.fn(() => publication.promise);
+    expect(mute.enabled$.value).toBe(false);
+    mute.setHandler(handler);
+
+    available$.next(new Map([["late", { type: "name", name: "Late device" }]]));
+    await flushPromises();
+    expect(handler).toHaveBeenCalledExactlyOnceWith(true);
+    expect(mute.enabled$.value).toBe(false);
+    expect(mute.syncing$.value).toBe(true);
+
+    publication.resolve(true);
+    await flushPromises();
+    expect(mute.enabled$.value).toBe(true);
+    expect(mute.syncing$.value).toBe(false);
+  });
+
   test("should automatically mute if force mute is set", async () => {
     const forceMute$ = new BehaviorSubject<boolean>(false);
 
