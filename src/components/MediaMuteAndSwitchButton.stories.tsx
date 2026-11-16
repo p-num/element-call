@@ -336,7 +336,9 @@ export const SelectionSettling: Story = {
       await menu.findByRole("menuitemradio", { name: "Microphone 2" }),
     );
 
-    await expect(await menu.findByLabelText("Activating…")).toBeVisible();
+    await waitFor(async () => {
+      await expect(menu.getByLabelText("Activating…")).toBeVisible();
+    });
     for (const item of menu.getAllByRole("menuitemradio"))
       await expect(item).toHaveAttribute("aria-disabled", "true");
   },
