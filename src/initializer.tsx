@@ -42,6 +42,7 @@ import { i18n, languageOfLocalePath } from "./utils/i18n.ts";
 import {
   configureSentryReporting,
   sentryErrorsEnabled,
+  sentryErrorsGeneration,
   sentryPerformanceEnabled,
 } from "./analytics/SentryReporting.ts";
 import { configureCallDiagnostics } from "./analytics/CallDiagnostics.ts";
@@ -318,6 +319,7 @@ export class Initializer {
           environment,
           release: import.meta.env.VITE_APP_VERSION || "dev",
           consent: sentryErrorsEnabled,
+          consentGeneration: sentryErrorsGeneration,
         });
         configureSentryReporting(errors, performance, () =>
           Sentry.init({

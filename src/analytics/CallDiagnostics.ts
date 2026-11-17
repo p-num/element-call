@@ -21,6 +21,7 @@ export interface CallDiagnosticsConfig {
   release: string;
   environment?: string;
   consent(): boolean;
+  consentGeneration(): number;
 }
 
 export interface CallDiagnosticReporter {

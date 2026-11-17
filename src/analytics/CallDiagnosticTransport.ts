@@ -28,6 +28,7 @@ export class CallDiagnosticTransport {
       release: string;
       environment?: string;
       consent(): boolean;
+      consentGeneration(): number;
     },
   ) {}
 
@@ -36,6 +37,7 @@ export class CallDiagnosticTransport {
     isCurrent: () => boolean,
   ): Event | undefined {
     if (!this.options.consent() || !isCurrent()) return undefined;
+    const consentGeneration = this.options.consentGeneration();
     const diagnostic = callFailureDiagnostic(source);
     if (diagnostic === null) return undefined;
     const attemptId = String(source.attemptId);
@@ -63,7 +65,8 @@ export class CallDiagnosticTransport {
     this.pending.set(event.event_id!, {
       event: structuredClone(event),
       capturedAt: Date.now(),
-      isCurrent,
+      isCurrent: () =>
+        consentGeneration === this.options.consentGeneration() && isCurrent(),
     });
     return event;
   }

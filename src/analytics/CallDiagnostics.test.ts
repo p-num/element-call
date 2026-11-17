@@ -26,6 +26,11 @@ import { createCallDiagnosticReporter } from "./CallDiagnostics";
 import { CallDiagnosticTransport } from "./CallDiagnosticTransport";
 import { callFailureDiagnostic } from "./CallFailureDiagnostic";
 import { type TelemetryEvent } from "./CallTelemetry";
+import {
+  sentryErrorsEnabled,
+  sentryErrorsGeneration,
+  setSentryReportingEnabled,
+} from "./SentryReporting";
 
 type Envelope = Parameters<ReturnType<typeof makeFetchTransport>["send"]>[0];
 
@@ -171,6 +176,43 @@ describe("pinned SDK handled-call wire boundary", () => {
     expect(sent).toEqual([]);
   });
 
+  it("permanently drops delayed diagnostics after crash consent is revoked then re-enabled", async () => {
+    const sent: Envelope[] = [];
+    let release: () => void = () => {
+      throw new Error("processor was not reached");
+    };
+    getGlobalScope().addEventProcessor(
+      async (event) =>
+        await new Promise((resolve) => {
+          release = () => resolve(event);
+        }),
+    );
+    setSentryReportingEnabled(true, false);
+    const reporter = createCallDiagnosticReporter(
+      config(sentryErrorsEnabled, sentryErrorsGeneration),
+      memoryTransport(sent),
+    )!;
+    try {
+      reporter.capture(failure(), () => true);
+      setSentryReportingEnabled(false, false);
+      setSentryReportingEnabled(true, false);
+      release();
+      await reporter.flush();
+      expect(sent).toEqual([]);
+
+      const freshFailure = { ...failure(), attemptId: crypto.randomUUID() };
+      reporter.capture(freshFailure, () => true);
+      release();
+      await reporter.flush();
+      expect(sent).toHaveLength(1);
+      expect(sent[0][1][0][1]).toMatchObject({
+        contexts: { call: { attemptId: freshFailure.attemptId } },
+      });
+    } finally {
+      setSentryReportingEnabled(false, false);
+    }
+  });
+
   it("does not change the ordinary client's scopes, processors or transport", async () => {
     const privateSent: Envelope[] = [];
     const ordinarySent: Envelope[] = [];
@@ -310,12 +352,21 @@ function failure(): TelemetryEvent {
   };
 }
 
-function config(consent: () => boolean): {
+function config(
+  consent: () => boolean,
+  consentGeneration: () => number = () => 0,
+): {
   dsn: string;
   release: string;
   consent(): boolean;
+  consentGeneration(): number;
 } {
-  return { dsn: "https://key@example.org/1", release: "component.1", consent };
+  return {
+    dsn: "https://key@example.org/1",
+    release: "component.1",
+    consent,
+    consentGeneration,
+  };
 }
 
 function memoryTransport(sent: Envelope[]): typeof makeFetchTransport {

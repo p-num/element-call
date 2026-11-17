@@ -10,10 +10,28 @@ import {
   configureSentryReporting,
   setSentryReportingEnabled,
   sentryErrorsEnabled,
+  sentryErrorsGeneration,
   sentryPerformanceEnabled,
 } from "./SentryReporting";
 
 describe("native Sentry reporting choices", () => {
+  it("advances the crash generation only when crash reporting is revoked", () => {
+    setSentryReportingEnabled(true, false);
+    const accepted = sentryErrorsGeneration();
+    setSentryReportingEnabled(true, true);
+    setSentryReportingEnabled(true, false);
+    expect(sentryErrorsGeneration()).toBe(accepted);
+    setSentryReportingEnabled(false, false);
+    expect(sentryErrorsGeneration()).toBe(accepted + 1);
+    setSentryReportingEnabled(false, true);
+    expect(sentryErrorsGeneration()).toBe(accepted + 1);
+    setSentryReportingEnabled(true, false);
+    expect(sentryErrorsEnabled()).toBe(true);
+    expect(sentryErrorsGeneration()).toBe(accepted + 1);
+    setSentryReportingEnabled(false, false);
+    expect(sentryErrorsGeneration()).toBe(accepted + 2);
+  });
+
   it("starts lazily and revokes each collection channel during a call", () => {
     const start = vi.fn();
     configureSentryReporting(false, false, start);
