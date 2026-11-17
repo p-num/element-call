@@ -347,9 +347,10 @@ export class PosthogAnalytics {
   }
 
   private setAnonymity(anonymity: Anonymity): void {
+    if (this.anonymity === anonymity) return;
     if (
       anonymity !== Anonymity.Pseudonymous &&
-      (this.enabled || this.anonymity === Anonymity.Pseudonymous)
+      this.anonymity === Anonymity.Pseudonymous
     )
       PosthogAnalytics.callGeneration++;
     // Update this.anonymity.
@@ -557,7 +558,9 @@ export class PosthogAnalytics {
   public static setUsageAnalyticsEnabled(enabled: boolean): void {
     enabled = enabled === true;
     this.hostUsageOverride = enabled;
-    if (!enabled) this.callGeneration++;
+    const previous = optInAnalytics.getValue();
+    if (previous === enabled) return;
+    if (previous === true && !enabled) this.callGeneration++;
     optInAnalytics.setRuntimeValue(enabled, "host-live");
   }
 
