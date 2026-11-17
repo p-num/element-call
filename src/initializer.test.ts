@@ -25,6 +25,10 @@ const sentryInitSpy = vi.hoisted(() => vi.fn());
 vi.mock("@sentry/react", () => ({
   init: sentryInitSpy,
   reactRouterV7BrowserTracingIntegration: vi.fn(),
+  makeFetchTransport: vi.fn(() => ({
+    send: vi.fn().mockResolvedValue({ statusCode: 200 }),
+    flush: vi.fn().mockResolvedValue(true),
+  })),
 }));
 
 describe("Initializer", async () => {

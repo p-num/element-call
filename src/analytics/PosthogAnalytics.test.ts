@@ -144,11 +144,12 @@ describe("PosthogAnalytics", () => {
 
     it("passes the explicit host usage choice for widgets and leaves standalone choice independent", () => {
       vi.stubEnv("VITE_PACKAGE", "full");
-      window.location.hash = "#?widgetId=fixture&usageAnalyticsEnabled=true";
+      const widgetParams = `widgetId=fixture&parentUrl=${encodeURIComponent("https://host.example.com.localhost")}`;
+      window.location.hash = `#?${widgetParams}&usageAnalyticsEnabled=true`;
       expect(analyticsConfigFromEnvironment().hostUsageAnalyticsEnabled).toBe(
         true,
       );
-      window.location.hash = "#?widgetId=fixture";
+      window.location.hash = `#?${widgetParams}`;
       expect(analyticsConfigFromEnvironment().hostUsageAnalyticsEnabled).toBe(
         false,
       );
