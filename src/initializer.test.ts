@@ -17,6 +17,7 @@ import {
 } from "vitest";
 
 import { mockConfig } from "./utils/test";
+import { setSentryReportingEnabled } from "./analytics/SentryReporting";
 
 const sentryInitSpy = vi.hoisted(() => vi.fn());
 
@@ -108,6 +109,52 @@ describe("Initializer", async () => {
               environment: "fooEnvironment",
             }),
           );
+        });
+
+        it.each([
+          [true, true],
+          [true, false],
+          [false, true],
+          [false, false],
+        ])(
+          "honors separate error (%s) and performance (%s) choices",
+          async (errors, performance) => {
+            window.location.hash = `#?sentryDsn=${encodeURIComponent("https://dsn.example.com.localhost")}&sentryCrashReportingEnabled=${errors}&sentryPerformanceReportingEnabled=${performance}`;
+            await Initializer.init();
+            if (!errors && !performance) {
+              expect(sentryInitSpy).not.toHaveBeenCalled();
+              return;
+            }
+            expect(sentryInitSpy).toHaveBeenCalledWith(
+              expect.objectContaining({
+                sampleRate: 1,
+                autoSessionTracking: false,
+                sendDefaultPii: false,
+              }),
+            );
+            const options = sentryInitSpy.mock.calls[0][0];
+            expect(options.tracesSampler()).toBe(performance ? 1 : 0);
+            const event = { event_id: "test" };
+            expect(options.beforeSend(event)).toEqual(errors ? event : null);
+            expect(options.beforeSendTransaction(event)).toEqual(
+              performance ? event : null,
+            );
+          },
+        );
+
+        it("applies native preference changes to pending reports and future traces", async () => {
+          window.location.hash = `#?sentryDsn=${encodeURIComponent("https://dsn.example.com.localhost")}`;
+          await Initializer.init();
+          const options = sentryInitSpy.mock.calls[0][0];
+          const event = { event_id: "test" };
+          setSentryReportingEnabled(false, false);
+          expect(options.beforeSend(event)).toBeNull();
+          expect(options.beforeSendTransaction(event)).toBeNull();
+          expect(options.tracesSampler()).toBe(0);
+          setSentryReportingEnabled(true, false);
+          expect(options.beforeSend(event)).toBe(event);
+          expect(options.beforeSendTransaction(event)).toBeNull();
+          expect(sentryInitSpy).toHaveBeenCalledTimes(1);
         });
       });
 
