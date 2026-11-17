@@ -30,13 +30,6 @@ import {
 import { useEventTarget } from "./useEvents";
 import { OpenElsewhereError } from "./RichError";
 
-declare global {
-  interface Window {
-    matrixclient: MatrixClient;
-    passwordlessUser: boolean;
-  }
-}
-
 export type ClientState = ValidClientState | ErrorState;
 
 export type ValidClientState = {

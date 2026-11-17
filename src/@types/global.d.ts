@@ -6,6 +6,7 @@ Please see LICENSE in the repository root for full details.
 */
 
 import { type setLogLevel as setLKLogLevel } from "livekit-client";
+import { type MatrixClient } from "matrix-js-sdk";
 
 import type { DurationFormat as PolyfillDurationFormat } from "@formatjs/intl-durationformat";
 import { type Controls } from "../controls";
@@ -18,6 +19,8 @@ declare global {
   }
 
   interface Window {
+    matrixclient: MatrixClient;
+    passwordlessUser: boolean;
     controls: Controls;
     setLKLogLevel: typeof setLKLogLevel;
   }
