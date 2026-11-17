@@ -41,6 +41,7 @@ export function createCallTelemetry(
   client: MatrixClient,
   room: Room,
   hostBridge: HostBridge,
+  hostCallTelemetryEnabled = false,
 ): CallTelemetry {
   const direct =
     client
@@ -49,6 +50,8 @@ export function createCallTelemetry(
   const version = import.meta.env.VITE_APP_VERSION || "dev";
   const analytics = PosthogAnalytics.instance;
   const isCurrent = analytics.callLifetime();
+  const hostOwnsLifecycle =
+    hostCallTelemetryEnabled && hostBridge.notifyCallTelemetry !== undefined;
   return new CallTelemetry({
     callKind: Object.values(direct).some(
       (rooms) => Array.isArray(rooms) && rooms.includes(room.roomId),
@@ -59,14 +62,13 @@ export function createCallTelemetry(
     hostAppVersion: hostBridge === nullHostBridge ? version : "unknown",
     hostAppBuild: hostBridge === nullHostBridge ? version : "unknown",
     isCurrent,
-    lifecycleOwner:
-      hostBridge.notifyCallTelemetry === undefined ? "component" : "host",
+    lifecycleOwner: hostOwnsLifecycle ? "host" : "component",
     track: (event) => {
       if (isCurrent()) analytics.trackCallEvent(event);
     },
-    reportLifecycle: async (report) => {
-      return await hostBridge.notifyCallTelemetry?.(report);
-    },
+    reportLifecycle: hostOwnsLifecycle
+      ? async (report) => await hostBridge.notifyCallTelemetry!(report)
+      : undefined,
     reportFailure: (event) => {
       if (isCurrent()) reportCallFailure(event, isCurrent);
     },
@@ -81,23 +83,39 @@ export function observeCallTelemetry(
   session: MatrixRTCSession,
   room: Room,
 ): void {
-  participation.state$.pipe(scope.bind()).subscribe((state) => {
-    switch (state.kind) {
-      case "connected":
-        telemetry.connection(true);
-        break;
-      case "reconnecting":
-        telemetry.connection(false);
-        break;
-      case "failed":
-        if (isPermissionRefused(state.error)) telemetry.permissionRefused();
-        else telemetry.fail(classifyCallFailure(state.error));
-        break;
-      case "left":
-        telemetry.end();
-        break;
-    }
-  });
+  combineLatest([
+    participation.state$,
+    participation.initialMicrophonePublication$,
+  ])
+    .pipe(scope.bind())
+    .subscribe(([state, microphone]) => {
+      if (state.kind !== "left" && microphone.kind === "failed") {
+        if (isPermissionRefused(microphone.error))
+          telemetry.permissionRefused();
+        else
+          telemetry.fail({
+            cause: "microphoneFailed",
+            stage: "media",
+            step: "mediaConnection",
+          });
+        return;
+      }
+      switch (state.kind) {
+        case "connected":
+          if (microphone.kind !== "pending") telemetry.connection(true);
+          break;
+        case "reconnecting":
+          telemetry.connection(false);
+          break;
+        case "failed":
+          if (isPermissionRefused(state.error)) telemetry.permissionRefused();
+          else telemetry.fail(classifyCallFailure(state.error));
+          break;
+        case "left":
+          telemetry.end();
+          break;
+      }
+    });
   const graph = new ParticipationGraph();
   let active = true;
   const digests = new Map<string, Promise<string>>();

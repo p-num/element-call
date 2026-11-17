@@ -13,7 +13,12 @@ import {
 } from "livekit-client";
 import { type Logger } from "matrix-js-sdk/lib/logger";
 
-import { type MediaSource, type PublishRequest } from "../../media-api";
+import {
+  type InitialMicrophonePublication,
+  type MediaSource,
+  type PublishRequest,
+} from "../../media-api";
+import { toMatrixRTCError } from "../../errors";
 import { livekitSources, mediaSources } from "./LivekitMediaTrack";
 import {
   audioCaptureOptions,
@@ -45,11 +50,15 @@ export class Publisher {
   /** Whether the initial requests have been published; `publish` is immediate from then on. */
   public started = false;
   private readonly room: LivekitRoom;
+  private destroyed = false;
 
   public constructor(
     room: LivekitRoom,
     private readonly desired: DesiredMedia,
     private readonly logger: Logger,
+    private readonly onInitialMicrophonePublication?: (
+      status: InitialMicrophonePublication,
+    ) => void,
   ) {
     this.room = room;
     room.setE2EEEnabled(room.options.e2ee !== undefined)?.catch((e: Error) => {
@@ -63,6 +72,7 @@ export class Publisher {
   }
 
   public async destroy(): Promise<void> {
+    this.destroyed = true;
     this.room.localParticipant.off(
       ParticipantEvent.LocalTrackPublished,
       this.onLocalTrackPublished,
@@ -88,15 +98,60 @@ export class Publisher {
     // resolves these once the track is published, which may block on the
     // connection; LocalTrackPublished is what tells us a track exists.
     if (sources.has("microphone") && sources.has("camera"))
-      void this.room.localParticipant.enableCameraAndMicrophone();
+      void this.room.localParticipant.enableCameraAndMicrophone().then(
+        () =>
+          this.recordMicrophonePublication(
+            this.room.localParticipant.getTrackPublication(
+              livekitSources.microphone,
+            ),
+          ),
+        async (error: unknown) => {
+          this.logger.error(
+            "Failed to publish the camera and microphone",
+            error,
+          );
+          // A camera refusal must not turn an available microphone into a failed join.
+          const microphone = this.desired.get("microphone");
+          if (!this.destroyed && microphone?.enabled)
+            await this.publishInitial(microphone.request);
+        },
+      );
     for (const request of requests)
       if (
         request.source === "screenShare" ||
         !(sources.has("microphone") && sources.has("camera"))
       )
-        this.publish(request).catch((e) => {
-          this.logger.error(`Failed to publish the ${request.source}`, e);
+        void this.publishInitial(request);
+  }
+
+  private async publishInitial(request: PublishRequest): Promise<void> {
+    try {
+      const publication = await this.publish(request);
+      if (request.source === "microphone")
+        this.recordMicrophonePublication(publication);
+    } catch (error) {
+      this.logger.error(`Failed to publish the ${request.source}`, error);
+      if (request.source === "microphone")
+        this.onInitialMicrophonePublication?.({
+          kind: "failed",
+          error: toMatrixRTCError(error),
         });
+    }
+  }
+
+  private recordMicrophonePublication(
+    publication: LocalTrackPublication | undefined,
+  ): void {
+    this.onInitialMicrophonePublication?.(
+      publication === undefined
+        ? {
+            kind: "failed",
+            error: toMatrixRTCError(
+              new Error("The microphone was not published"),
+            ),
+          }
+        : { kind: "published" },
+    );
   }
 
   /** Publishes one request and resolves with its publication once LiveKit has it. */

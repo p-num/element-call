@@ -56,7 +56,12 @@ export function toMatrixRTCError(error: unknown): MatrixRTCError {
       ErrorCategory.UNKNOWN,
       { cause: error },
     );
-  return new MatrixRTCError(String(error));
+  return new MatrixRTCError(
+    String(error),
+    ErrorCode.UNKNOWN_ERROR,
+    ErrorCategory.UNKNOWN,
+    { cause: error },
+  );
 }
 
 export class MatrixRTCTransportMissingError extends MatrixRTCError {

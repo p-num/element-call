@@ -80,7 +80,11 @@ export interface HostBridge {
   notifyJoined(): Promise<void>;
   /** Current local MatrixRTC and media connection; never inferred from join intent. */
   notifyConnectionState?(state: { connected: boolean }): Promise<void>;
-  /** Closed component lifecycle reports; the widget API supplies exact fromWidget addressing. */
+  /**
+   * Closed lifecycle reports. The URL's hostCallTelemetryEnabled must also be
+   * true before this capability is used; a widget transport alone cannot vouch
+   * that its host implements the custom action.
+   */
   notifyCallTelemetry?(
     report: LifecycleReport,
   ): Promise<LifecycleAcknowledgement | undefined>;

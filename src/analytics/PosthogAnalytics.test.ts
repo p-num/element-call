@@ -348,6 +348,8 @@ describe("identifying the user", () => {
   }
 
   beforeEach(() => {
+    vi.restoreAllMocks();
+    vi.spyOn(posthog, "identify").mockImplementation(() => {});
     PosthogAnalytics.resetInstance();
     optInAnalytics.setValue(true);
   });
@@ -395,6 +397,81 @@ describe("identifying the user", () => {
     });
     expect(capture).toHaveBeenCalledTimes(1);
   });
+
+  it("queues first-use call boundaries until the account identity is accepted, then captures teardown synchronously", async () => {
+    const accountData = Promise.withResolvers<{ id: string }>();
+    const client = mockClient(null);
+    vi.mocked(client.getAccountDataFromServer).mockReturnValue(
+      accountData.promise,
+    );
+    window.matrixclient = client;
+    PosthogAnalytics.configure({ ...credentials, matrixBackend: "jssdk" });
+    let distinctId = "transient-before-identification";
+    vi.spyOn(posthog, "identify").mockImplementation((id) => {
+      distinctId = id!;
+    });
+    const delivered: { event: string; identity: string }[] = [];
+    vi.spyOn(posthog, "capture").mockImplementation((event) => {
+      delivered.push({ event, identity: distinctId });
+      return undefined;
+    });
+    const analytics = PosthogAnalytics.instance;
+    analytics.callLifetime();
+    analytics.trackCallEvent({ eventName: "CallJoinAttempted" });
+    analytics.trackCallEvent({
+      eventName: "CallJoinOutcome",
+      outcome: "connected",
+    });
+    expect(delivered).toEqual([]);
+    accountData.resolve({ id: "accepted-account-identity" });
+    await vi.waitFor(() => expect(delivered).toHaveLength(2));
+    analytics.trackCallEvent({ eventName: "CallParticipationEnded" });
+    analytics.logout();
+    expect(delivered).toEqual([
+      { event: "CallJoinAttempted", identity: "accepted-account-identity" },
+      { event: "CallJoinOutcome", identity: "accepted-account-identity" },
+      {
+        event: "CallParticipationEnded",
+        identity: "accepted-account-identity",
+      },
+    ]);
+  });
+
+  it.each(["logout", "reset", "optOutThenIn"])(
+    "drops queued call boundaries from a revoked generation after %s",
+    async (action) => {
+      const accountData = Promise.withResolvers<{ id: string }>();
+      const client = mockClient(null);
+      vi.mocked(client.getAccountDataFromServer).mockReturnValue(
+        accountData.promise,
+      );
+      window.matrixclient = client;
+      PosthogAnalytics.configure({ ...credentials, matrixBackend: "jssdk" });
+      const capture = vi.spyOn(posthog, "capture");
+      const identify = vi.spyOn(posthog, "identify");
+      const analytics = PosthogAnalytics.instance;
+      analytics.callLifetime();
+      analytics.trackCallEvent({
+        eventName: "CallLifecycle",
+        phase: "terminated",
+      });
+      expect(capture).not.toHaveBeenCalled();
+      if (action === "logout") analytics.logout();
+      else if (action === "reset") PosthogAnalytics.resetInstance();
+      else {
+        PosthogAnalytics.setUsageAnalyticsEnabled(false);
+        PosthogAnalytics.setUsageAnalyticsEnabled(true);
+      }
+      accountData.resolve({ id: "accepted-after-revocation" });
+      await vi.waitFor(() =>
+        expect(client.getAccountDataFromServer).toHaveBeenCalled(),
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(capture).not.toHaveBeenCalled();
+      if (action !== "optOutThenIn") expect(identify).not.toHaveBeenCalled();
+    },
+  );
 
   it("invalidates an accepted call across opt-out then opt-in while allowing a fresh crash-only attempt", () => {
     window.matrixclient = mockClient(null);

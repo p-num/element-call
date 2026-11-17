@@ -230,6 +230,10 @@ export class PosthogAnalytics {
   private static hostUsageOverride: boolean | undefined;
 
   private identificationPromise?: Promise<void>;
+  private identifiedGeneration: number | undefined;
+  private identificationPending = false;
+  private identificationRevision = 0;
+  private pendingCallEvents: TelemetryEvent[] = [];
   private readonly enabled: boolean = false;
   private anonymity = Anonymity.Disabled;
   private platformSuperProperties = {};
@@ -268,6 +272,7 @@ export class PosthogAnalytics {
 
   public static resetInstance(): void {
     this.callGeneration++;
+    this.internalInstance?.clearCallIdentity();
     this.internalInstance?.optInListener?.unsubscribe();
     this.hostUsageOverride = undefined;
     this.internalInstance = null;
@@ -351,8 +356,10 @@ export class PosthogAnalytics {
     if (
       anonymity !== Anonymity.Pseudonymous &&
       this.anonymity === Anonymity.Pseudonymous
-    )
+    ) {
       PosthogAnalytics.callGeneration++;
+      this.clearCallIdentity();
+    }
     // Update this.anonymity.
     // To update the anonymity typically you want to call updateAnonymityFromSettings
     // to ensure this value is in step with the user's settings.
@@ -379,45 +386,68 @@ export class PosthogAnalytics {
     analyticsIdGenerator: () => string,
   ): Promise<void> {
     const generation = PosthogAnalytics.callGeneration;
+    const revision = ++this.identificationRevision;
     if (this.anonymity == Anonymity.Pseudonymous && this.enabled) {
-      // Check the user's account_data for an analytics ID to use. Storing the ID in account_data allows
-      // different devices to send the same ID.
-      let analyticsID = await this.getAnalyticsId();
-      if (
-        generation !== PosthogAnalytics.callGeneration ||
-        this.anonymity !== Anonymity.Pseudonymous
-      )
-        return;
+      this.identifiedGeneration = undefined;
+      this.identificationPending = true;
       try {
-        if (!analyticsID && this.config.matrixBackend !== "embedded") {
-          // only mint an analytics ID when we are the ones storing it.
+        // Check the user's account_data for an analytics ID to use. Storing the ID in account_data allows
+        // different devices to send the same ID.
+        let analyticsID =
+          this.config.matrixBackend === "embedded"
+            ? this.config.hostAnalyticsId
+            : await this.getAnalyticsId();
+        if (
+          generation !== PosthogAnalytics.callGeneration ||
+          revision !== this.identificationRevision ||
+          this.anonymity !== Anonymity.Pseudonymous
+        )
+          return;
+        try {
+          if (!analyticsID && this.config.matrixBackend !== "embedded") {
+            // only mint an analytics ID when we are the ones storing it.
 
-          // Couldn't retrieve an analytics ID from user settings, so create one and set it on the server.
-          // Note there's a race condition here - if two devices do these steps at the same time, last write
-          // wins, and the first writer will send tracking with an ID that doesn't match the one on the server
-          // until the next time account data is refreshed and this function is called (most likely on next
-          // page load). This will happen pretty infrequently, so we can tolerate the possibility.
-          analyticsID = analyticsIdGenerator();
-          await this.setAccountAnalyticsId(analyticsID);
+            // Couldn't retrieve an analytics ID from user settings, so create one and set it on the server.
+            // Note there's a race condition here - if two devices do these steps at the same time, last write
+            // wins, and the first writer will send tracking with an ID that doesn't match the one on the server
+            // until the next time account data is refreshed and this function is called (most likely on next
+            // page load). This will happen pretty infrequently, so we can tolerate the possibility.
+            analyticsID = analyticsIdGenerator();
+            await this.setAccountAnalyticsId(analyticsID);
+          }
+        } catch (e) {
+          // The above could fail due to network requests, but not essential to starting the application,
+          // so swallow it.
+          logger.log(
+            "Unable to identify user for tracking" + (e as Error)?.toString(),
+          );
         }
-      } catch (e) {
-        // The above could fail due to network requests, but not essential to starting the application,
-        // so swallow it.
-        logger.log(
-          "Unable to identify user for tracking" + (e as Error)?.toString(),
-        );
-      }
-      if (
-        generation !== PosthogAnalytics.callGeneration ||
-        this.anonymity !== Anonymity.Pseudonymous
-      )
-        return;
-      if (analyticsID) {
-        this.posthog.identify(analyticsID);
-      } else {
-        logger.info(
-          "No analyticsID is available. Should not try to setup posthog",
-        );
+        if (
+          generation !== PosthogAnalytics.callGeneration ||
+          revision !== this.identificationRevision ||
+          this.anonymity !== Anonymity.Pseudonymous
+        )
+          return;
+        if (analyticsID) {
+          this.posthog.identify(analyticsID);
+          this.identifiedGeneration = generation;
+          this.identificationPending = false;
+          const pending = this.pendingCallEvents;
+          this.pendingCallEvents = [];
+          for (const event of pending) this.trackCallEvent(event);
+        } else {
+          this.identificationPending = false;
+          this.pendingCallEvents = [];
+          logger.info(
+            "No analyticsID is available. Should not try to setup posthog",
+          );
+        }
+      } finally {
+        if (revision === this.identificationRevision) {
+          this.identificationPending = false;
+          if (this.identifiedGeneration !== generation)
+            this.pendingCallEvents = [];
+        }
       }
     }
   }
@@ -455,6 +485,7 @@ export class PosthogAnalytics {
 
   public logout(): void {
     PosthogAnalytics.callGeneration++;
+    this.clearCallIdentity();
     if (this.enabled) {
       this.posthog.reset();
     }
@@ -493,11 +524,12 @@ export class PosthogAnalytics {
     const generation = PosthogAnalytics.callGeneration;
     // We may not yet have a Matrix client at this point, if not, bail. This should get
     // triggered again by onLoginStatusChanged once we do have a client.
-    if (!window.matrixclient) return;
+    if (!window.matrixclient && this.config.matrixBackend !== "embedded")
+      return;
 
     if (this.anonymity === Anonymity.Pseudonymous) {
       this.setRegistrationType(
-        window.matrixclient.isGuest() || window.passwordlessUser
+        window.matrixclient?.isGuest() || window.passwordlessUser
           ? RegistrationType.Guest
           : RegistrationType.Registered,
       );
@@ -542,10 +574,22 @@ export class PosthogAnalytics {
     }
   }
 
-  /** Call boundaries must be captured before teardown/reset, with consent checked now. */
-  public trackCallEvent({ eventName, ...properties }: TelemetryEvent): void {
-    if (this.anonymity !== Anonymity.Pseudonymous) return;
+  /** Accepted identities capture synchronously; first-use boundaries wait for identification. */
+  public trackCallEvent(event: TelemetryEvent): void {
+    if (!this.enabled || this.anonymity !== Anonymity.Pseudonymous) return;
+    if (this.identifiedGeneration !== PosthogAnalytics.callGeneration) {
+      if (this.identificationPending) this.pendingCallEvents.push({ ...event });
+      return;
+    }
+    const { eventName, ...properties } = event;
     this.capture(eventName, properties, { send_instantly: true });
+  }
+
+  private clearCallIdentity(): void {
+    this.identifiedGeneration = undefined;
+    this.identificationPending = false;
+    this.identificationRevision++;
+    this.pendingCallEvents = [];
   }
 
   /** Normal choice initialization precedes accepting the attempt, including crash-only calls. */
@@ -560,7 +604,10 @@ export class PosthogAnalytics {
     this.hostUsageOverride = enabled;
     const previous = optInAnalytics.getValue();
     if (previous === enabled) return;
-    if (previous === true && !enabled) this.callGeneration++;
+    if (previous === true && !enabled) {
+      this.callGeneration++;
+      this.internalInstance?.clearCallIdentity();
+    }
     optInAnalytics.setRuntimeValue(enabled, "host-live");
   }
 

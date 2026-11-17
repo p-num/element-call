@@ -64,6 +64,15 @@ scope.end();
 `participation.localMember$` is one member of the same shape, null until our own
 membership is in the room; its microphone would only echo.
 
+`participation.initialMicrophonePublication$` separately reports `notRequested`,
+`pending`, `published` or `failed` for the microphone requested at join. A connected
+membership/media transport can still receive while publication is pending or has
+failed. LiveKit reports the publication promise's result, preserving the original
+error as its cause; a combined camera refusal retries the microphone alone.
+The evidence remains settled across mute and reconnection. A custom media backend
+may provide the same optional behavior; otherwise the participation observes its
+microphone track as publication evidence, without changing the backend interface.
+
 [`dev/main.ts`](./dev/main.ts) is this example as a working page.
 
 ## Reading the code

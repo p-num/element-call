@@ -27,6 +27,7 @@ import {
 
 import {
   type LocalAudioMediaTrack,
+  type InitialMicrophonePublication,
   type LocalVideoMediaTrack,
   type MediaSource,
   type PublishRequest,
@@ -64,6 +65,7 @@ interface Props {
 }
 
 export interface LivekitLocalMedia extends LocalMediaBackend {
+  readonly initialMicrophonePublication$: Behavior<InitialMicrophonePublication>;
   /** The connection the local member publishes on; the data channel sends on it. */
   connection$: Behavior<Connection | null>;
   setAudioOutputDeviceId(deviceId: string): Promise<void>;
@@ -112,6 +114,16 @@ export function createLivekitLocalMedia({
   const publishing$ = new BehaviorSubject(false);
   const publisher$ = new BehaviorSubject<Publisher | null>(null);
   const publishError$ = new BehaviorSubject<Error | null>(null);
+  const initialMicrophonePublication =
+    new BehaviorSubject<InitialMicrophonePublication>(
+      initialRequests.some(({ source }) => source === "microphone")
+        ? { kind: "pending" }
+        : { kind: "notRequested" },
+    );
+  let active = true;
+  scope.onEnd(() => {
+    active = false;
+  });
 
   scope.reconcile(connection$, async (connection) => {
     if (connection === null) return;
@@ -119,6 +131,17 @@ export function createLivekitLocalMedia({
       connection.livekitRoom,
       desired,
       logger.getChild(`[Publisher ${JSON.stringify(connection.transport)}]`),
+      (status) => {
+        if (
+          !active ||
+          publisher$.value !== publisher ||
+          initialMicrophonePublication.value.kind !== "pending"
+        )
+          return;
+        initialMicrophonePublication.next(status);
+        if (status.kind === "failed" && publishError$.value === null)
+          publishError$.next(status.error);
+      },
     );
     publisher$.next(publisher);
     return Promise.resolve(async (): Promise<void> => {
@@ -194,6 +217,11 @@ export function createLivekitLocalMedia({
     const published = publishedSource(source);
     if (published === undefined) return;
     desired.delete(published);
+    if (
+      published === "microphone" &&
+      initialMicrophonePublication.value.kind === "pending"
+    )
+      initialMicrophonePublication.next({ kind: "notRequested" });
     await publisher$.value?.unpublish(published);
   };
 
@@ -209,6 +237,7 @@ export function createLivekitLocalMedia({
     encryptionError$,
     setPublishing: (publish) => publishing$.next(publish),
     publishError$,
+    initialMicrophonePublication$: scope.behavior(initialMicrophonePublication),
     publish,
     unpublish,
     setAudioOutputDeviceId,

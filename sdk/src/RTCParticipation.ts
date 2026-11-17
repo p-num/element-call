@@ -30,7 +30,7 @@ import {
 
 import { defaultSessionTimings, MatrixRTCMode } from "./config";
 import { E2eeType } from "./encryption";
-import { type Behavior } from "./reactive/Behavior";
+import { type Behavior, constant } from "./reactive/Behavior";
 import { type ObservableScope } from "./reactive/ObservableScope";
 import { generateItems } from "./reactive/observable";
 import { mapScoped } from "./utils/mapScoped";
@@ -66,6 +66,7 @@ import {
 import { createKeyRotationSuppressed$ } from "./matrixrtc/JsRtcSessionBehaviors";
 import { type TransportRegistry } from "./matrixrtc/Transports";
 import { participationState } from "./participationState";
+import { type InitialMicrophonePublication } from "./media-api";
 
 /** What the slot lends a participation. */
 export interface ParticipationDeps {
@@ -298,6 +299,21 @@ export function createRTCParticipation(
       slot,
       leave,
       state$,
+      initialMicrophonePublication$:
+        backend.local.initialMicrophonePublication$ ??
+        (options.publish.some(({ source }) => source === "microphone")
+          ? scope.behavior<InitialMicrophonePublication>(
+              backend.local.tracks$.pipe(
+                scan(
+                  (previous, tracks) =>
+                    tracks?.some(({ source }) => source === "microphone")
+                      ? { kind: "published" }
+                      : previous,
+                  { kind: "pending" } as InitialMicrophonePublication,
+                ),
+              ),
+            )
+          : constant({ kind: "notRequested" })),
       localMember$,
       remoteMembers$,
       publish: async (request) => backend.local.publish(request),

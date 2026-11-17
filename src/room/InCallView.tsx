@@ -171,6 +171,7 @@ export const ActiveCall: FC<ActiveCallProps> = (props) => {
       props.client,
       props.matrixRoom,
       hostBridge,
+      urlParams.hostCallTelemetryEnabled,
     );
     const sentCallNotification$ = createSentCallNotification$(
       scope,

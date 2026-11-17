@@ -104,6 +104,8 @@ export interface UrlProperties {
   posthogUserId: string | null;
   /** The host's explicit usage choice; embedded defaults off independently of credentials. */
   usageAnalyticsEnabled: boolean;
+  /** The host implements the versioned call lifecycle action and owns those records. */
+  hostCallTelemetryEnabled: boolean;
   /**
    * The Posthog API host. This is only used in the embedded package of Element Call.
    */
@@ -273,6 +275,7 @@ export const componentProperties: UrlProperties = {
   fontScale: null,
   posthogUserId: null,
   usageAnalyticsEnabled: false,
+  hostCallTelemetryEnabled: false,
   posthogApiHost: null,
   posthogApiKey: null,
   e2eEnabled: true,
@@ -352,6 +355,8 @@ export const computeUrlParams = (search = "", hash = ""): UrlParams => {
     posthogApiKey: parser.getParam("posthogApiKey"),
     posthogUserId: parser.getParam("posthogUserId"),
     usageAnalyticsEnabled: parser.getParam("usageAnalyticsEnabled") === "true",
+    hostCallTelemetryEnabled:
+      parser.getParam("hostCallTelemetryEnabled") === "true",
     rageshakeSubmitUrl: parser.getParam("rageshakeSubmitUrl"),
     sentryDsn: parser.getParam("sentryDsn"),
     sentryEnvironment: parser.getParam("sentryEnvironment"),

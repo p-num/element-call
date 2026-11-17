@@ -42,6 +42,19 @@ function mockTransport(): {
 }
 
 describe("createWidgetHostBridge", () => {
+  test("keeps unsupported host telemetry rejection visible to the negotiated caller", async () => {
+    const transport = mockTransport();
+    const unsupported = new Error("unsupported custom action");
+    transport.send.mockRejectedValue(unsupported);
+    const bridge = createWidgetHostBridge(mockWidget({ transport } as never));
+    await expect(
+      bridge.notifyCallTelemetry!({
+        phase: "initiation",
+        componentAttemptId: "12345678-1234-4234-8234-123456789abc",
+      }),
+    ).rejects.toBe(unsupported);
+    expect(transport.send).toHaveBeenCalledOnce();
+  });
   test("validates and projects the hostAttemptId acknowledgement without exposing response extras", async () => {
     const hostAttemptId = "abcdef01-1234-4234-8234-123456789abc";
     const componentAttemptId = "12345678-1234-4234-8234-123456789abc";

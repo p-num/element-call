@@ -14,16 +14,20 @@ import {
 import { BehaviorSubject } from "rxjs";
 import {
   ErrorCode,
+  type InitialMicrophonePublication,
   PeerConnectionTimeoutError,
   type ParticipationState,
 } from "@element-hq/matrixrtc-sdk";
 
 import {
   classifyCallFailure,
+  createCallTelemetry,
   membershipIdentity,
   observeCallTelemetry,
 } from "./CallTelemetry";
 import { CallTelemetry, type TelemetryEvent } from "../analytics/CallTelemetry";
+import { PosthogAnalytics } from "../analytics/PosthogAnalytics";
+import { nullHostBridge } from "../HostBridge";
 import {
   mockMatrixRoom,
   mockRtcMembership,
@@ -33,6 +37,119 @@ import {
 } from "../utils/test";
 
 describe("SDK call telemetry boundaries", () => {
+  it.each([
+    [new DOMException("refused", "NotAllowedError"), "permissionRefused"],
+    [new Error("publication failed"), "failed"],
+  ])(
+    "gates the connected outcome on required microphone publication: %s",
+    (error, outcome) => {
+      const scope = testScope();
+      const microphone = new BehaviorSubject<InitialMicrophonePublication>({
+        kind: "pending",
+      });
+      const participation = mockRTCParticipation(scope, {
+        initialMicrophonePublication$: microphone,
+      });
+      const room = mockMatrixRoom({});
+      const events: TelemetryEvent[] = [];
+      const failures = vi.fn();
+      const telemetry = new CallTelemetry({
+        callKind: "dm",
+        componentVersion: "test",
+        hostAppVersion: "test",
+        hostAppBuild: "test",
+        track: (event) => events.push(event),
+        reportFailure: failures,
+      });
+      observeCallTelemetry(
+        scope,
+        telemetry,
+        participation,
+        new MockRTCSession(room) as unknown as MatrixRTCSession,
+        room,
+      );
+      expect(
+        events.filter((event) => event.eventName === "CallJoinOutcome"),
+      ).toEqual([]);
+      microphone.next({ kind: "failed", error });
+      expect(
+        events
+          .filter((event) => event.eventName === "CallJoinOutcome")
+          .map((event) => event.outcome),
+      ).toEqual([outcome]);
+      expect(events.some((event) => event.phase === "connected")).toBe(false);
+      if (outcome === "failed") {
+        expect(failures).toHaveBeenCalledWith(
+          expect.objectContaining({
+            cause: "microphoneFailed",
+            phase: "joining",
+          }),
+        );
+        expect(
+          events.filter((event) => event.eventName === "CallFailure"),
+        ).toHaveLength(1);
+      } else expect(failures).not.toHaveBeenCalled();
+      microphone.next({ kind: "published" });
+      scope.end();
+      expect(
+        events.filter((event) => event.eventName === "CallJoinOutcome"),
+      ).toHaveLength(1);
+    },
+  );
+
+  it("connects only when the required microphone succeeds and preserves reconnection after later mute", () => {
+    const scope = testScope();
+    const microphone = new BehaviorSubject<InitialMicrophonePublication>({
+      kind: "pending",
+    });
+    const states = new BehaviorSubject<ParticipationState>({
+      kind: "connected",
+    });
+    const participation = mockRTCParticipation(scope, {
+      state$: states,
+      initialMicrophonePublication$: microphone,
+    });
+    const room = mockMatrixRoom({});
+    const events: TelemetryEvent[] = [];
+    const telemetry = new CallTelemetry({
+      callKind: "dm",
+      componentVersion: "test",
+      hostAppVersion: "test",
+      hostAppBuild: "test",
+      track: (event) => events.push(event),
+    });
+    observeCallTelemetry(
+      scope,
+      telemetry,
+      participation,
+      new MockRTCSession(room) as unknown as MatrixRTCSession,
+      room,
+    );
+    expect(
+      events.filter((event) => event.eventName === "CallJoinOutcome"),
+    ).toEqual([]);
+    microphone.next({ kind: "published" });
+    states.next({ kind: "reconnecting", reason: "media" });
+    states.next({ kind: "connected" });
+    scope.end();
+    expect(
+      events
+        .filter((event) => event.eventName === "CallJoinOutcome")
+        .map((event) => event.outcome),
+    ).toEqual(["connected"]);
+    expect(
+      events
+        .filter((event) => event.eventName === "CallLifecycle")
+        .map((event) => event.phase),
+    ).toEqual([
+      "initiation",
+      "connected",
+      "disconnected",
+      "reconnected",
+      "terminated",
+    ]);
+  });
+
   it("records initial connection states and synchronously ends before scope teardown", () => {
     const scope = testScope();
     const states = new BehaviorSubject<ParticipationState>({
@@ -95,6 +212,74 @@ describe("SDK call telemetry boundaries", () => {
         message: "private-token",
       } as never),
     ).toEqual({ cause: "other", stage: "media", step: "mediaToken" });
+  });
+});
+
+describe("host call telemetry capability", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it.each([undefined, false, true])(
+    "selects lifecycle ownership from explicit capability %s",
+    async (enabled) => {
+      const events: TelemetryEvent[] = [];
+      vi.spyOn(PosthogAnalytics.instance, "callLifetime").mockReturnValue(
+        () => true,
+      );
+      vi.spyOn(PosthogAnalytics.instance, "trackCallEvent").mockImplementation(
+        (event) => {
+          events.push(event);
+        },
+      );
+      const notifyCallTelemetry = vi
+        .fn()
+        .mockRejectedValue(new Error("unsupported custom action"));
+      const telemetry = createCallTelemetry(
+        { getAccountData: () => undefined } as never,
+        mockMatrixRoom({}),
+        { ...nullHostBridge, notifyCallTelemetry },
+        enabled,
+      );
+      telemetry.connection(true);
+      telemetry.end();
+      await Promise.resolve();
+      if (enabled) {
+        expect(notifyCallTelemetry).toHaveBeenCalled();
+        expect(
+          events.filter((event) => event.eventName === "CallLifecycle"),
+        ).toEqual([]);
+      } else {
+        expect(notifyCallTelemetry).not.toHaveBeenCalled();
+        expect(
+          events
+            .filter((event) => event.eventName === "CallLifecycle")
+            .map((event) => event.phase),
+        ).toEqual(["initiation", "connected", "terminated"]);
+      }
+      expect(
+        events.filter((event) => event.eventName === "CallJoinOutcome"),
+      ).toHaveLength(1);
+    },
+  );
+
+  it("keeps component lifecycle when the flag is true but the bridge lacks the action", () => {
+    const events: TelemetryEvent[] = [];
+    vi.spyOn(PosthogAnalytics.instance, "callLifetime").mockReturnValue(
+      () => true,
+    );
+    vi.spyOn(PosthogAnalytics.instance, "trackCallEvent").mockImplementation(
+      (event) => {
+        events.push(event);
+      },
+    );
+    createCallTelemetry(
+      { getAccountData: () => undefined } as never,
+      mockMatrixRoom({}),
+      nullHostBridge,
+      true,
+    ).end();
+    expect(
+      events.filter((event) => event.eventName === "CallLifecycle"),
+    ).toHaveLength(2);
   });
 });
 
