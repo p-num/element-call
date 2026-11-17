@@ -43,8 +43,9 @@ export function createCallTelemetry(
   hostBridge: HostBridge,
 ): CallTelemetry {
   const direct =
-    client.getAccountData("m.direct")?.getContent<Record<string, string[]>>() ??
-    {};
+    client
+      .getAccountData(EventType.Direct)
+      ?.getContent<Record<string, string[]>>() ?? {};
   const version = import.meta.env.VITE_APP_VERSION || "dev";
   const analytics = PosthogAnalytics.instance;
   const isCurrent = analytics.callLifetime();

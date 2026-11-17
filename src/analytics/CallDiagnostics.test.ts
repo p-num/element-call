@@ -10,6 +10,7 @@ import {
   BrowserClient,
   defaultStackParser,
   getGlobalScope,
+  getIsolationScope,
   type makeFetchTransport,
   type Scope,
   SDK_VERSION,
@@ -30,25 +31,32 @@ type Envelope = Parameters<ReturnType<typeof makeFetchTransport>["send"]>[0];
 
 describe("pinned SDK handled-call wire boundary", () => {
   let originalGlobal: Scope;
+  let originalIsolation: Scope;
   beforeEach(() => {
     originalGlobal = getGlobalScope().clone();
+    originalIsolation = getIsolationScope().clone();
     vi.stubEnv("PROD", true);
     vi.stubEnv("MODE", "production");
   });
   afterEach(() => {
-    const scope = getGlobalScope();
-    scope.clear();
-    scope.update(originalGlobal);
-    scope
-      .getScopeData()
-      .eventProcessors.splice(
-        0,
-        Infinity,
-        ...originalGlobal.getScopeData().eventProcessors,
-      );
-    scope.clearAttachments();
-    for (const attachment of originalGlobal.getScopeData().attachments)
-      scope.addAttachment(attachment);
+    // The browser SDK reuses its isolation scope even inside withIsolationScope.
+    for (const [scope, original] of [
+      [getGlobalScope(), originalGlobal],
+      [getIsolationScope(), originalIsolation],
+    ]) {
+      scope.clear();
+      scope.update(original);
+      scope
+        .getScopeData()
+        .eventProcessors.splice(
+          0,
+          Infinity,
+          ...original.getScopeData().eventProcessors,
+        );
+      scope.clearAttachments();
+      for (const attachment of original.getScopeData().attachments)
+        scope.addAttachment(attachment);
+    }
     vi.unstubAllEnvs();
   });
 
@@ -273,14 +281,14 @@ describe("dedicated transport envelope acceptance", () => {
     await transport.send(polluted);
     await transport.send(polluted);
     await transport.send([
-      { event_id: "f".repeat(32) },
+      { event_id: "f".repeat(32), sent_at: "2026-11-17T12:00:00Z" },
       [
         [
           { type: "event" },
           { message: "private-internal-recovery", event_id: "f".repeat(32) },
         ],
       ],
-    ] as Envelope);
+    ]);
     expect(sent).toHaveLength(1);
     expect(JSON.stringify(sent)).not.toMatch(
       /private-|trace|attachment|session|client_report/,
