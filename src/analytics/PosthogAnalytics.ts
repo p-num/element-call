@@ -24,11 +24,10 @@ import {
   MuteMicrophoneTracker,
   UndecryptableToDeviceEventTracker,
   QualitySurveyEventTracker,
-  CallDisconnectedEventTracker,
-  CallConnectDurationTracker,
   CallReconnectingTracker,
 } from "./PosthogEvents";
 import { optInAnalytics } from "../settings/settings";
+import { type TelemetryEvent } from "./CallTelemetry";
 
 /* Posthog analytics tracking.
  *
@@ -117,6 +116,55 @@ export function santizeSensitiveData(
   anonymity: Anonymity,
 ): CaptureResult | null {
   if (event === null) return null;
+  delete event.properties.callId;
+
+  if (
+    [
+      "CallJoinAttempted",
+      "CallJoinOutcome",
+      "CallFailure",
+      "CallParticipationEnded",
+      "CallLifecycle",
+      "CallCorrelation",
+    ].includes(event.event)
+  ) {
+    const allowed = new Set([
+      "distinct_id",
+      "callImplementation",
+      "callPlatform",
+      "callComponentVersion",
+      "attemptId",
+      "callKind",
+      "outcome",
+      "endReason",
+      "cause",
+      "phase",
+      "stage",
+      "step",
+      "durationMs",
+      "participantsMax",
+      "schemaVersion",
+      "eventSource",
+      "sequence",
+      "elapsedMs",
+      "hostAppVersion",
+      "hostAppBuild",
+      "correlationState",
+      "sessionId",
+      "reason",
+      "connectionScope",
+      "correlationKind",
+      "participationId",
+      "canonicalRoot",
+      "participantA",
+      "participantB",
+      "previousRoot",
+    ]);
+    for (const key of Object.keys(event.properties))
+      if (!allowed.has(key)) delete event.properties[key];
+    delete event.$set;
+    delete event.$set_once;
+  }
 
   stripSensitiveFields(event.properties, anonymity);
   // posthog can stash person-profile updates either at the top level
@@ -457,6 +505,12 @@ export class PosthogAnalytics {
     }
   }
 
+  /** Call boundaries must be captured before teardown/reset, with consent checked now. */
+  public trackCallEvent({ eventName, ...properties }: TelemetryEvent): void {
+    if (this.anonymity !== Anonymity.Pseudonymous) return;
+    this.capture(eventName, properties, { send_instantly: true });
+  }
+
   public startListeningToSettingsChanges(): void {
     // Listen to account data changes from sync so we can observe changes to relevant flags and update.
     // This is called -
@@ -494,7 +548,5 @@ export class PosthogAnalytics {
   public eventMuteCamera = new MuteCameraTracker();
   public eventUndecryptableToDevice = new UndecryptableToDeviceEventTracker();
   public eventQualitySurvey = new QualitySurveyEventTracker();
-  public eventCallDisconnected = new CallDisconnectedEventTracker();
-  public eventCallConnectDuration = new CallConnectDurationTracker();
   public eventCallReconnecting = new CallReconnectingTracker();
 }

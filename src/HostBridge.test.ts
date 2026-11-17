@@ -42,6 +42,78 @@ function mockTransport(): {
 }
 
 describe("createWidgetHostBridge", () => {
+  test("reports only closed telemetry data using a separate monotonic widget sequence", async () => {
+    const transport = mockTransport();
+    const bridge = createWidgetHostBridge(
+      mockWidget({ transport } as unknown as Partial<WidgetApi>),
+    );
+    const componentAttemptId = "12345678-1234-4234-8234-123456789abc";
+    await bridge.notifyCallTelemetry!({
+      phase: "initiation",
+      componentAttemptId,
+    });
+    await bridge.notifyConnectionState!({ connected: true });
+    await bridge.notifyCallTelemetry!({
+      phase: "connected",
+      componentAttemptId,
+      token: "secret",
+    } as never);
+    await bridge.notifyCallTelemetry!({
+      phase: "terminated",
+      reason: "left",
+      componentAttemptId,
+    });
+    expect(
+      transport.send.mock.calls.filter(
+        ([action]) => action === ElementWidgetActions.CallTelemetry,
+      ),
+    ).toEqual([
+      [
+        "io.letro.call_telemetry",
+        {
+          schemaVersion: 1,
+          sequence: 1,
+          phase: "initiation",
+          componentAttemptId,
+        },
+      ],
+      [
+        "io.letro.call_telemetry",
+        {
+          schemaVersion: 1,
+          sequence: 2,
+          phase: "connected",
+          componentAttemptId,
+        },
+      ],
+      [
+        "io.letro.call_telemetry",
+        {
+          schemaVersion: 1,
+          sequence: 3,
+          phase: "terminated",
+          reason: "left",
+          componentAttemptId,
+        },
+      ],
+    ]);
+    await bridge.notifyCallTelemetry!({
+      phase: "secret-server-text",
+      componentAttemptId,
+    } as never);
+    await bridge.notifyCallTelemetry!({
+      phase: "failed",
+      reason: "secret-server-text",
+      componentAttemptId,
+    } as never);
+    await bridge.notifyCallTelemetry!({
+      phase: "failed",
+      componentAttemptId: "raw-room-id",
+    } as never);
+    expect(transport.send).toHaveBeenCalledTimes(4);
+    expect(JSON.stringify(transport.send.mock.calls)).not.toContain("secret");
+  });
+
   describe("telling the host what Element Call is doing", () => {
     test("asks to be kept on screen, and to stop being", async () => {
       const setAlwaysOnScreen = vi.fn().mockResolvedValue(true);

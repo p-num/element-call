@@ -44,6 +44,7 @@ import {
   sentryErrorsEnabled,
   sentryPerformanceEnabled,
 } from "./analytics/SentryReporting.ts";
+import { configureCallDiagnostics } from "./analytics/CallDiagnostics.ts";
 
 // This generates a map of locale names to their URL (based on import.meta.url), which looks like this:
 // {
@@ -304,6 +305,12 @@ export class Initializer {
         environment = Config.get().sentry?.environment;
       }
       if (dsn) {
+        configureCallDiagnostics({
+          dsn,
+          environment,
+          release: import.meta.env.VITE_APP_VERSION || "dev",
+          consent: sentryErrorsEnabled,
+        });
         configureSentryReporting(errors, performance, () =>
           Sentry.init({
             dsn,

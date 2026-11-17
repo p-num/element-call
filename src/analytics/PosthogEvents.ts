@@ -5,7 +5,6 @@ SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Element-Commercial
 Please see LICENSE in the repository root for full details.
 */
 
-import { type DisconnectReason } from "livekit-client";
 import { logger } from "matrix-js-sdk/lib/logger";
 import { type MatrixRTCSession } from "matrix-js-sdk/lib/matrixrtc";
 
@@ -244,55 +243,6 @@ export class QualitySurveyEventTracker {
       feedbackText,
       stars,
     });
-  }
-}
-
-interface CallDisconnectedEvent {
-  eventName: "CallDisconnected";
-  reason?: DisconnectReason;
-}
-
-export class CallDisconnectedEventTracker {
-  public track(reason?: DisconnectReason): void {
-    PosthogAnalytics.instance.trackEvent<CallDisconnectedEvent>({
-      eventName: "CallDisconnected",
-      reason,
-    });
-  }
-}
-
-interface CallConnectDuration extends IPosthogEvent {
-  eventName: "CallConnectDuration";
-  totalDuration: number;
-  websocketDuration: number;
-  peerConnectionDuration: number;
-}
-
-export class CallConnectDurationTracker {
-  private connectStart = 0;
-  private websocketConnected = 0;
-  public cacheConnectStart(): void {
-    this.connectStart = Date.now();
-  }
-  public cacheWsConnect(): void {
-    this.websocketConnected = Date.now();
-  }
-
-  public track(options = { log: false }): void {
-    const now = Date.now();
-    const totalDuration = now - this.connectStart;
-    const websocketDuration = this.websocketConnected - this.connectStart;
-    const peerConnectionDuration = now - this.websocketConnected;
-    PosthogAnalytics.instance.trackEvent<CallConnectDuration>({
-      eventName: "CallConnectDuration",
-      totalDuration,
-      websocketDuration,
-      peerConnectionDuration,
-    });
-    if (options.log)
-      logger.log(
-        `Time to connect:\ntotal: ${totalDuration}ms\npeerConnection: ${websocketDuration}ms\nwebsocket: ${peerConnectionDuration}ms`,
-      );
   }
 }
 

@@ -143,6 +143,32 @@ describe("PosthogAnalytics", () => {
   });
 
   describe("applyPrivacyFilters", () => {
+    it("strips every ambient property and all room IDs from call telemetry", () => {
+      const event = {
+        event: "CallLifecycle",
+        properties: {
+          distinct_id: "consented-analytics-id",
+          schemaVersion: 1,
+          phase: "connected",
+          callId: "!secret:server",
+          $current_url: "https://call.example/secret",
+          $device_id: "secret",
+          $referrer: "secret",
+          $set: { token: "secret" },
+          token: "secret",
+        },
+        $set: { token: "secret" },
+        $set_once: { token: "secret" },
+      } as unknown as CaptureResult;
+      expect(
+        santizeSensitiveData(event, Anonymity.Pseudonymous)?.properties,
+      ).toEqual({
+        distinct_id: "consented-analytics-id",
+        schemaVersion: 1,
+        phase: "connected",
+      });
+      expect(JSON.stringify(event)).not.toContain("secret");
+    });
     const makeEvent = (properties: Record<string, unknown>): CaptureResult =>
       ({ event: "anyEvent", properties }) as unknown as CaptureResult;
 
@@ -325,6 +351,29 @@ describe("identifying the user", () => {
 
     // The host owns the user's account, so Element Call must not write to it
     expect(client.setAccountData).not.toHaveBeenCalled();
+  });
+
+  it("captures final call events synchronously and drops them immediately on logout", () => {
+    window.matrixclient = mockClient(null);
+    PosthogAnalytics.configure({
+      ...credentials,
+      matrixBackend: "embedded",
+      hostAnalyticsId: "host-id",
+    });
+    const capture = vi.spyOn(posthog, "capture");
+    const analytics = PosthogAnalytics.instance;
+    analytics.startListeningToSettingsChanges();
+    analytics.trackCallEvent({
+      eventName: "CallLifecycle",
+      phase: "terminated",
+    });
+    expect(capture).toHaveBeenCalledTimes(1);
+    analytics.logout();
+    analytics.trackCallEvent({
+      eventName: "CallLifecycle",
+      phase: "terminated",
+    });
+    expect(capture).toHaveBeenCalledTimes(1);
   });
 
   it("keeps its own ID in account data when it owns the session", async () => {
