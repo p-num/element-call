@@ -339,8 +339,7 @@ export class Initializer {
           }),
         );
       }
-      // Sentry is now 'loadeed' (even if we actually skipped starting
-      // it due to to not being configured)
+      // Missing configuration or disabled reporting still completes startup.
       this.loadStates.sentry = LoadState.Loaded;
     }
 
