@@ -42,6 +42,37 @@ function mockTransport(): {
 }
 
 describe("createWidgetHostBridge", () => {
+  test("validates and projects the hostAttemptId acknowledgement without exposing response extras", async () => {
+    const hostAttemptId = "abcdef01-1234-4234-8234-123456789abc";
+    const componentAttemptId = "12345678-1234-4234-8234-123456789abc";
+    const transport = mockTransport();
+    transport.send
+      .mockResolvedValueOnce({ hostAttemptId, token: "private-token" })
+      .mockResolvedValueOnce({ hostAttemptId: "private-raw-room" })
+      .mockResolvedValueOnce(undefined);
+    const bridge = createWidgetHostBridge(
+      mockWidget({ transport } as unknown as Partial<WidgetApi>),
+    );
+    expect(
+      await bridge.notifyCallTelemetry!({
+        phase: "initiation",
+        componentAttemptId,
+      }),
+    ).toEqual({ hostAttemptId });
+    expect(
+      await bridge.notifyCallTelemetry!({
+        phase: "connected",
+        componentAttemptId,
+      }),
+    ).toBeUndefined();
+    expect(
+      await bridge.notifyCallTelemetry!({
+        phase: "terminated",
+        reason: "left",
+        componentAttemptId,
+      }),
+    ).toBeUndefined();
+  });
   test("reports only closed telemetry data using a separate monotonic widget sequence", async () => {
     const transport = mockTransport();
     const bridge = createWidgetHostBridge(

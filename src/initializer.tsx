@@ -111,11 +111,19 @@ const Backend = {
  */
 // Exported for testing
 export function analyticsConfigFromEnvironment(): AnalyticsConfig {
-  const { posthogApiKey, posthogApiHost, posthogUserId, isWidget } =
-    getUrlParams();
+  const {
+    posthogApiKey,
+    posthogApiHost,
+    posthogUserId,
+    usageAnalyticsEnabled,
+    isWidget,
+  } = getUrlParams();
   return {
     matrixBackend: isWidget ? "embedded" : "jssdk",
     hostAnalyticsId: posthogUserId,
+    ...(isWidget || import.meta.env.VITE_PACKAGE === "embedded"
+      ? { hostUsageAnalyticsEnabled: usageAnalyticsEnabled }
+      : {}),
     ...(import.meta.env.VITE_PACKAGE === "embedded"
       ? {
           apiKey: posthogApiKey ?? undefined,

@@ -11,7 +11,7 @@ import {
   type MatrixRTCSession,
   MatrixRTCSessionEvent,
 } from "matrix-js-sdk/lib/matrixrtc";
-import { combineLatest, fromEvent, startWith } from "rxjs";
+import { combineLatest, fromEvent, merge, startWith } from "rxjs";
 import {
   ErrorCode,
   type RTCParticipation,
@@ -41,6 +41,8 @@ export function createCallTelemetry(
     client.getAccountData("m.direct")?.getContent<Record<string, string[]>>() ??
     {};
   const version = import.meta.env.VITE_APP_VERSION || "dev";
+  const analytics = PosthogAnalytics.instance;
+  const isCurrent = analytics.callLifetime();
   return new CallTelemetry({
     callKind: Object.values(direct).some(
       (rooms) => Array.isArray(rooms) && rooms.includes(room.roomId),
@@ -50,11 +52,18 @@ export function createCallTelemetry(
     componentVersion: version,
     hostAppVersion: hostBridge === nullHostBridge ? version : "unknown",
     hostAppBuild: hostBridge === nullHostBridge ? version : "unknown",
-    track: (event) => PosthogAnalytics.instance.trackCallEvent(event),
-    reportLifecycle: (report) => {
-      void hostBridge.notifyCallTelemetry?.(report).catch(() => {});
+    isCurrent,
+    lifecycleOwner:
+      hostBridge.notifyCallTelemetry === undefined ? "component" : "host",
+    track: (event) => {
+      if (isCurrent()) analytics.trackCallEvent(event);
     },
-    reportFailure: reportCallFailure,
+    reportLifecycle: async (report) => {
+      return await hostBridge.notifyCallTelemetry?.(report);
+    },
+    reportFailure: (event) => {
+      if (isCurrent()) reportCallFailure(event, isCurrent);
+    },
   });
 }
 
@@ -87,15 +96,17 @@ export function observeCallTelemetry(
   let active = true;
   const digests = new Map<string, Promise<string>>();
   combineLatest([
-    fromEvent(session, MatrixRTCSessionEvent.MembershipsChanged).pipe(
-      startWith(null),
-    ),
+    merge(
+      fromEvent(session, MatrixRTCSessionEvent.MembershipsChanged),
+      telemetry.correlationReady$,
+    ).pipe(startWith(null)),
     participation.localMember$,
   ])
     .pipe(scope.bind())
     .subscribe(([, local]) => {
       telemetry.participants(session.memberships.length);
       if (
+        !telemetry.canCorrelate() ||
         local === null ||
         PosthogAnalytics.instance.getAnonymity() !== Anonymity.Pseudonymous
       )

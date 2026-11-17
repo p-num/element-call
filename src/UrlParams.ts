@@ -102,6 +102,8 @@ export interface UrlProperties {
    * The Posthog analytics ID. It is only available if the user has given consent for sharing telemetry in element web.
    */
   posthogUserId: string | null;
+  /** The host's explicit usage choice; embedded defaults off independently of credentials. */
+  usageAnalyticsEnabled: boolean;
   /**
    * The Posthog API host. This is only used in the embedded package of Element Call.
    */
@@ -270,6 +272,7 @@ export const componentProperties: UrlProperties = {
   fonts: [],
   fontScale: null,
   posthogUserId: null,
+  usageAnalyticsEnabled: false,
   posthogApiHost: null,
   posthogApiKey: null,
   e2eEnabled: true,
@@ -348,17 +351,14 @@ export const computeUrlParams = (search = "", hash = ""): UrlParams => {
     posthogApiHost: parser.getParam("posthogApiHost"),
     posthogApiKey: parser.getParam("posthogApiKey"),
     posthogUserId: parser.getParam("posthogUserId"),
+    usageAnalyticsEnabled: parser.getParam("usageAnalyticsEnabled") === "true",
     rageshakeSubmitUrl: parser.getParam("rageshakeSubmitUrl"),
     sentryDsn: parser.getParam("sentryDsn"),
     sentryEnvironment: parser.getParam("sentryEnvironment"),
-    sentryCrashReportingEnabled: parser.getFlagParam(
-      "sentryCrashReportingEnabled",
-      true,
-    ),
-    sentryPerformanceReportingEnabled: parser.getFlagParam(
-      "sentryPerformanceReportingEnabled",
-      true,
-    ),
+    sentryCrashReportingEnabled:
+      parser.getParam("sentryCrashReportingEnabled") === "true",
+    sentryPerformanceReportingEnabled:
+      parser.getParam("sentryPerformanceReportingEnabled") === "true",
     e2eEnabled: parser.getFlagParam("enableE2EE", true),
   };
 

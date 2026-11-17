@@ -201,6 +201,7 @@ export interface AnalyticsConfig {
   matrixBackend: "embedded" | "jssdk";
   /** The analytics ID the host has assigned to this user, when embedded. */
   hostAnalyticsId?: string | null;
+  hostUsageAnalyticsEnabled?: boolean;
 }
 
 /** Analytics are off until someone asks for them. */
@@ -225,6 +226,8 @@ export class PosthogAnalytics {
 
   // set true during the constructor if posthog config is present, otherwise false
   private static internalInstance: PosthogAnalytics | null = null;
+  private static callGeneration = 0;
+  private static hostUsageOverride: boolean | undefined;
 
   private identificationPromise?: Promise<void>;
   private readonly enabled: boolean = false;
@@ -264,7 +267,9 @@ export class PosthogAnalytics {
   }
 
   public static resetInstance(): void {
-    // Reset the singleton instance
+    this.callGeneration++;
+    this.internalInstance?.optInListener?.unsubscribe();
+    this.hostUsageOverride = undefined;
     this.internalInstance = null;
     this.analyticsConfig = analyticsDisabled;
   }
@@ -273,6 +278,16 @@ export class PosthogAnalytics {
     private readonly posthog: PostHog,
     private readonly config: AnalyticsConfig,
   ) {
+    if (
+      config.matrixBackend === "embedded" ||
+      config.hostUsageAnalyticsEnabled !== undefined ||
+      PosthogAnalytics.hostUsageOverride !== undefined
+    )
+      optInAnalytics.setRuntimeValue(
+        PosthogAnalytics.hostUsageOverride ??
+          config.hostUsageAnalyticsEnabled === true,
+        "host-initial",
+      );
     const { apiKey, apiHost } = config;
 
     if (apiKey && apiHost) {
@@ -332,6 +347,11 @@ export class PosthogAnalytics {
   }
 
   private setAnonymity(anonymity: Anonymity): void {
+    if (
+      anonymity !== Anonymity.Pseudonymous &&
+      (this.enabled || this.anonymity === Anonymity.Pseudonymous)
+    )
+      PosthogAnalytics.callGeneration++;
     // Update this.anonymity.
     // To update the anonymity typically you want to call updateAnonymityFromSettings
     // to ensure this value is in step with the user's settings.
@@ -357,10 +377,16 @@ export class PosthogAnalytics {
   private async identifyUser(
     analyticsIdGenerator: () => string,
   ): Promise<void> {
+    const generation = PosthogAnalytics.callGeneration;
     if (this.anonymity == Anonymity.Pseudonymous && this.enabled) {
       // Check the user's account_data for an analytics ID to use. Storing the ID in account_data allows
       // different devices to send the same ID.
       let analyticsID = await this.getAnalyticsId();
+      if (
+        generation !== PosthogAnalytics.callGeneration ||
+        this.anonymity !== Anonymity.Pseudonymous
+      )
+        return;
       try {
         if (!analyticsID && this.config.matrixBackend !== "embedded") {
           // only mint an analytics ID when we are the ones storing it.
@@ -380,6 +406,11 @@ export class PosthogAnalytics {
           "Unable to identify user for tracking" + (e as Error)?.toString(),
         );
       }
+      if (
+        generation !== PosthogAnalytics.callGeneration ||
+        this.anonymity !== Anonymity.Pseudonymous
+      )
+        return;
       if (analyticsID) {
         this.posthog.identify(analyticsID);
       } else {
@@ -422,6 +453,7 @@ export class PosthogAnalytics {
   }
 
   public logout(): void {
+    PosthogAnalytics.callGeneration++;
     if (this.enabled) {
       this.posthog.reset();
     }
@@ -457,6 +489,7 @@ export class PosthogAnalytics {
   }
 
   private async maybeIdentifyUser(): Promise<void> {
+    const generation = PosthogAnalytics.callGeneration;
     // We may not yet have a Matrix client at this point, if not, bail. This should get
     // triggered again by onLoginStatusChanged once we do have a client.
     if (!window.matrixclient) return;
@@ -472,6 +505,7 @@ export class PosthogAnalytics {
         PosthogAnalytics.getRandomAnalyticsId,
       );
       await this.identificationPromise;
+      if (generation !== PosthogAnalytics.callGeneration) return;
       if (this.userRegisteredInThisSession()) {
         this.eventSignup.track();
       }
@@ -486,8 +520,10 @@ export class PosthogAnalytics {
     { eventName, ...properties }: E,
     options?: CaptureOptions,
   ): void {
+    const generation = PosthogAnalytics.callGeneration;
     const doCapture = (): void => {
       if (
+        generation !== PosthogAnalytics.callGeneration ||
         this.anonymity == Anonymity.Disabled ||
         this.anonymity == Anonymity.Anonymous
       )
@@ -509,6 +545,20 @@ export class PosthogAnalytics {
   public trackCallEvent({ eventName, ...properties }: TelemetryEvent): void {
     if (this.anonymity !== Anonymity.Pseudonymous) return;
     this.capture(eventName, properties, { send_instantly: true });
+  }
+
+  /** Normal choice initialization precedes accepting the attempt, including crash-only calls. */
+  public callLifetime(): () => boolean {
+    this.startListeningToSettingsChanges();
+    const generation = PosthogAnalytics.callGeneration;
+    return () => generation === PosthogAnalytics.callGeneration;
+  }
+
+  public static setUsageAnalyticsEnabled(enabled: boolean): void {
+    enabled = enabled === true;
+    this.hostUsageOverride = enabled;
+    if (!enabled) this.callGeneration++;
+    optInAnalytics.setRuntimeValue(enabled, "host-live");
   }
 
   public startListeningToSettingsChanges(): void {

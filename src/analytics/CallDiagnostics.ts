@@ -9,9 +9,11 @@ import {
   BrowserClient,
   defaultStackParser,
   makeFetchTransport,
-  type Event,
+  Scope,
+  SDK_VERSION,
 } from "@sentry/react";
 
+import { CallDiagnosticTransport } from "./CallDiagnosticTransport";
 import { type TelemetryEvent } from "./CallTelemetry";
 
 export interface CallDiagnosticsConfig {
@@ -21,126 +23,54 @@ export interface CallDiagnosticsConfig {
   consent(): boolean;
 }
 
-let report: (event: TelemetryEvent) => void = () => {};
+export interface CallDiagnosticReporter {
+  capture(event: TelemetryEvent, isCurrent: () => boolean): void;
+  flush(): PromiseLike<boolean>;
+}
 
-/** A separate, integration-free client cannot inherit global users, logs or scopes. */
+let reporter: CallDiagnosticReporter | undefined;
+
 export function configureCallDiagnostics(config: CallDiagnosticsConfig): void {
-  report = () => {};
+  reporter = createCallDiagnosticReporter(config);
+}
+
+/** Final-envelope validation is independent of SDK scope/processor/beforeSend ordering. */
+export function createCallDiagnosticReporter(
+  config: CallDiagnosticsConfig,
+  transport: typeof makeFetchTransport = makeFetchTransport,
+): CallDiagnosticReporter | undefined {
   if (
     !import.meta.env.PROD ||
     import.meta.env.MODE === "development" ||
+    SDK_VERSION !== "8.55.2" ||
     !config.dsn
   )
-    return;
+    return undefined;
+  const boundary = new CallDiagnosticTransport(config);
   const client = new BrowserClient({
     dsn: config.dsn,
     release: config.release,
     environment: config.environment,
     integrations: [],
     stackParser: defaultStackParser,
-    transport: makeFetchTransport,
+    transport: (options) => boundary.wrap(transport(options)),
     sendDefaultPii: false,
-    beforeSend: (event) => {
-      if (!config.consent()) return null;
-      const safe = callFailureDiagnostic({
-        ...event.contexts?.call,
-        eventName: "CallFailure",
-      });
-      if (safe === null) return null;
-      // The SDK can add ambient browser context even with no integrations.
-      return {
-        event_id: event.event_id,
-        timestamp: event.timestamp,
-        platform: "javascript",
-        level: "warning",
-        message: safe.message,
-        exception: safe.exception,
-        fingerprint: safe.fingerprint,
-        tags: safe.tags,
-        contexts: safe.contexts,
-        release: config.release,
-        environment: config.environment,
-      };
-    },
+    sendClientReports: false,
   });
   client.init();
-  report = (event) => {
-    if (!config.consent()) return;
-    const diagnostic = callFailureDiagnostic(event);
-    if (diagnostic !== null) client.captureEvent(diagnostic);
-  };
-}
-
-export function reportCallFailure(event: TelemetryEvent): void {
-  report(event);
-}
-
-/** The input is never spread: server errors, errcodes and IDs have no route here. */
-export function callFailureDiagnostic(
-  event: Record<string, unknown>,
-): Event | null {
-  const causes = [
-    "joinTimedOut",
-    "joinRefused",
-    "slotClosed",
-    "noMediaServer",
-    "tokenEndpointUnsupported",
-    "connectionLostNeverConnected",
-    "connectionLostRefused",
-    "connectionLostBudget",
-    "microphoneFailed",
-    "other",
-  ];
-  if (
-    event.eventName !== "CallFailure" ||
-    typeof event.cause !== "string" ||
-    !causes.includes(event.cause) ||
-    !["joining", "inCall"].includes(String(event.phase)) ||
-    typeof event.attemptId !== "string" ||
-    !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
-      event.attemptId,
-    )
-  )
-    return null;
-  const call: Record<string, string> = {
-    attemptId: event.attemptId,
-    cause: event.cause,
-    phase: String(event.phase),
-  };
-  if (event.callKind === "dm" || event.callKind === "group")
-    call.callKind = event.callKind;
-  if (event.stage === "homeserver" || event.stage === "media")
-    call.stage = event.stage;
-  if (
-    [
-      "transportDiscovery",
-      "membership",
-      "mediaToken",
-      "mediaConnection",
-      "unknown",
-    ].includes(String(event.step))
-  )
-    call.step = String(event.step);
   return {
-    message: "Unsuccessful call",
-    exception: {
-      values: [
-        {
-          type: "CallFailure",
-          value: event.cause,
-          mechanism: { type: "generic", handled: true },
-        },
-      ],
+    capture: (source, isCurrent) => {
+      const event = boundary.authorize(source, isCurrent);
+      if (event !== undefined)
+        client.captureEvent(event, { attachments: [] }, new Scope());
     },
-    level: "warning",
-    fingerprint: ["call-failure", event.cause, String(event.phase)],
-    tags: {
-      category: "call-failure",
-      cause: event.cause,
-      phase: String(event.phase),
-      callPlatform: "web",
-      callImplementation: "embedded",
-    },
-    contexts: { call },
+    flush: async () => await client.flush(1000),
   };
+}
+
+export function reportCallFailure(
+  event: TelemetryEvent,
+  isCurrent: () => boolean,
+): void {
+  reporter?.capture(event, isCurrent);
 }

@@ -90,7 +90,7 @@ describe("Initializer", async () => {
         });
 
         it("uses sentryDsn param if set", async () => {
-          window.location.hash = `#?sentryDsn=${encodeURIComponent("https://dsn.example.com.localhost")}`;
+          window.location.hash = `#?sentryDsn=${encodeURIComponent("https://dsn.example.com.localhost")}&sentryCrashReportingEnabled=true`;
           await Initializer.init();
           expect(sentryInitSpy).toHaveBeenCalledWith(
             expect.objectContaining({
@@ -101,7 +101,7 @@ describe("Initializer", async () => {
         });
 
         it("uses sentryDsn and sentryEnvironment params if set", async () => {
-          window.location.hash = `#?sentryDsn=${encodeURIComponent("https://dsn.example.com.localhost")}&sentryEnvironment=fooEnvironment`;
+          window.location.hash = `#?sentryDsn=${encodeURIComponent("https://dsn.example.com.localhost")}&sentryEnvironment=fooEnvironment&sentryCrashReportingEnabled=true`;
           await Initializer.init();
           expect(sentryInitSpy).toHaveBeenCalledWith(
             expect.objectContaining({
@@ -143,7 +143,7 @@ describe("Initializer", async () => {
         );
 
         it("applies native preference changes to pending reports and future traces", async () => {
-          window.location.hash = `#?sentryDsn=${encodeURIComponent("https://dsn.example.com.localhost")}`;
+          window.location.hash = `#?sentryDsn=${encodeURIComponent("https://dsn.example.com.localhost")}&sentryCrashReportingEnabled=true`;
           await Initializer.init();
           const options = sentryInitSpy.mock.calls[0][0];
           const event = { event_id: "test" };
@@ -155,6 +155,12 @@ describe("Initializer", async () => {
           expect(options.beforeSend(event)).toBe(event);
           expect(options.beforeSendTransaction(event)).toBeNull();
           expect(sentryInitSpy).toHaveBeenCalledTimes(1);
+        });
+
+        it("does not infer consent from an embedded DSN when reporting flags are absent", async () => {
+          window.location.hash = `#?sentryDsn=${encodeURIComponent("https://dsn.example.com.localhost")}`;
+          await Initializer.init();
+          expect(sentryInitSpy).not.toHaveBeenCalled();
         });
       });
 

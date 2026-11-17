@@ -53,6 +53,25 @@ describe("participation identity v1", () => {
     expect(normalizedSlot("m.call#another")).toBe("m.call#another");
   });
 
+  it.each([
+    [
+      "legacy:1234567890",
+      "80c431cf2ce574fbbaf2e75330be7ba177af3c409692ef60662b358f449c890b",
+    ],
+    [
+      "per-join",
+      "56c28d9cd9eb30866df9774de45609794047cb5876425af412ff26554e2650b7",
+    ],
+  ] as const)(
+    "preserves the literal room slot in the shared %s negative fixture",
+    async (generation, expected) => {
+      expect(normalizedSlot("room")).toBe("room");
+      expect(
+        await participationDigest({ ...identity(generation), slotId: "room" }),
+      ).toBe(expected);
+    },
+  );
+
   it("length-prefixes UTF-8 fields without Unicode normalization or boundary ambiguity", async () => {
     expect(
       await participationDigest({

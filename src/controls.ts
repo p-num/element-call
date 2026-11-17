@@ -8,8 +8,10 @@ Please see LICENSE in the repository root for full details.
 import { Subject } from "rxjs";
 import { logger } from "matrix-js-sdk/lib/logger";
 import { setSentryReportingEnabled } from "./analytics/SentryReporting.ts";
+import { PosthogAnalytics } from "./analytics/PosthogAnalytics";
 
 export interface Controls {
+  setUsageAnalyticsEnabled(enabled: boolean): void;
   setSentryReportingEnabled(errors: boolean, performance: boolean): void;
   canEnterPip(): boolean;
   enablePip(): void;
@@ -105,6 +107,8 @@ export const setPlaybackStarted = (): void => {
 };
 
 window.controls = {
+  setUsageAnalyticsEnabled: (enabled) =>
+    PosthogAnalytics.setUsageAnalyticsEnabled(enabled),
   setSentryReportingEnabled,
   canEnterPip(): boolean {
     return setPipEnabled$.observed;

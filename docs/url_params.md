@@ -89,6 +89,10 @@ These parameters are only supported in [widget](./embedded_standalone.md) mode.
 
 ### Embedded-only parameters
 
+Reporting choices are explicit and independent. `usageAnalyticsEnabled=true` enables the existing usage-analytics choice for an embedded package or widget; absence, `false`, or malformed values leave it off. Full standalone keeps its saved usage choice. `sentryCrashReportingEnabled=true` and `sentryPerformanceReportingEnabled=true` separately enable the corresponding embedded Sentry channels; both default off, and a DSN does not imply consent. The host should pass all three choices, with crash reporting false in Debug. PostHog routing still uses `posthogApiHost`, `posthogApiKey` and the consented `posthogUserId`; Sentry routing still uses `sentryDsn` and `sentryEnvironment`.
+
+After content has loaded, apply native preference changes through `window.controls.setUsageAnalyticsEnabled(enabled)` and `window.controls.setSentryReportingEnabled(errors, performance)` using literal booleans. Usage disable synchronously invalidates previously accepted call lifetimes and does not overwrite the standalone preference in local storage. Error/performance changes remain independent. There is no reporting-settings `io.letro` widget action; `io.letro.call_telemetry` reports lifecycle only.
+
 These parameters are only supported in the [embedded](./embedded_standalone.md) package of Element Call and will be ignored in the [full](./embedded_standalone.md) package.
 
 | Name                 | Values                                                                     | Required | Description                                                                                                                        |

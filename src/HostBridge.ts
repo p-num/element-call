@@ -18,7 +18,10 @@ import {
   type JoinCallData,
   type WidgetHelpers,
 } from "./widget";
-import { type LifecycleReport } from "./analytics/CallTelemetry";
+import {
+  type LifecycleReport,
+  type LifecycleAcknowledgement,
+} from "./analytics/CallTelemetry";
 
 // Note: these are type aliases rather than interfaces so that they satisfy the
 // widget API's index-signature payload types.
@@ -78,7 +81,9 @@ export interface HostBridge {
   /** Current local MatrixRTC and media connection; never inferred from join intent. */
   notifyConnectionState?(state: { connected: boolean }): Promise<void>;
   /** Closed component lifecycle reports; the widget API supplies exact fromWidget addressing. */
-  notifyCallTelemetry?(report: LifecycleReport): Promise<void>;
+  notifyCallTelemetry?(
+    report: LifecycleReport,
+  ): Promise<LifecycleAcknowledgement | undefined>;
   /** Tells the host that the user has hung up. */
   notifyHungUp(): Promise<void>;
   /** Tells the host the user's current audio and video mute state. */
@@ -201,11 +206,23 @@ export function createWidgetHostBridge(widget: WidgetHelpers): HostBridge {
       const data = validatedLifecycleReport(report);
       if (data === undefined || telemetrySequence >= Number.MAX_SAFE_INTEGER)
         return;
-      await send(ElementWidgetActions.CallTelemetry, {
-        ...data,
-        schemaVersion: 1,
-        sequence: ++telemetrySequence,
-      });
+      const response = await widget.api.transport.send(
+        ElementWidgetActions.CallTelemetry,
+        {
+          ...data,
+          schemaVersion: 1,
+          sequence: ++telemetrySequence,
+        },
+      );
+      const hostAttemptId = response?.hostAttemptId;
+      if (
+        typeof hostAttemptId !== "string" ||
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+          hostAttemptId,
+        )
+      )
+        return undefined;
+      return { hostAttemptId };
     },
     notifyHungUp: async () => send(ElementWidgetActions.HangupCall),
     notifyDeviceMute: async (state) =>

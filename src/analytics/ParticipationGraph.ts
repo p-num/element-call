@@ -56,9 +56,7 @@ export async function participationDigest(
 }
 
 export function normalizedSlot(slot: string): string {
-  return ["", "ROOM", "room", "m.call#", "m.call#ROOM", "m.call#room"].includes(
-    slot,
-  )
+  return ["", "ROOM", "m.call#", "m.call#ROOM"].includes(slot)
     ? "m.call#room"
     : slot;
 }

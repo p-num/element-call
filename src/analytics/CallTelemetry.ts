@@ -6,6 +6,7 @@ Please see LICENSE in the repository root for full details.
 */
 
 import { type CorrelationUpdate } from "./ParticipationGraph";
+import { Subject } from "rxjs";
 
 export type CallPhase =
   | "initiation"
@@ -62,6 +63,7 @@ export type LifecycleReport = {
   reason?: CallReason;
   componentAttemptId: string;
 };
+export type LifecycleAcknowledgement = { hostAttemptId: string };
 export type TelemetryEvent = {
   eventName: string;
   [key: string]: string | number | undefined;
@@ -73,8 +75,12 @@ export interface CallTelemetryOptions {
   hostAppVersion: string;
   hostAppBuild: string;
   track(event: TelemetryEvent): void;
-  reportLifecycle?(report: LifecycleReport): void;
+  reportLifecycle?(
+    report: LifecycleReport,
+  ): Promise<LifecycleAcknowledgement | undefined> | void;
   reportFailure?(event: TelemetryEvent): void;
+  lifecycleOwner?: "component" | "host";
+  isCurrent?(): boolean;
   now?(): number;
   attemptId?: string;
 }
@@ -86,11 +92,15 @@ export class CallTelemetry {
   private readonly common: TelemetryEvent;
   private sequence = 0;
   private terminal = false;
+  private ending = false;
   private rang = false;
   private connectedAt: number | undefined;
   private disconnected = false;
   private participantsMax = 1;
   private sessionId: string | undefined;
+  private hostAttemptId: string | undefined;
+  private readonly correlationReady = new Subject<void>();
+  public readonly correlationReady$ = this.correlationReady.asObservable();
 
   public constructor(private readonly options: CallTelemetryOptions) {
     this.now = options.now ?? (() => performance.now());
@@ -108,13 +118,20 @@ export class CallTelemetry {
   }
 
   public ringing(): void {
-    if (this.terminal || this.rang || this.connectedAt !== undefined) return;
+    if (
+      !this.isCurrent() ||
+      this.terminal ||
+      this.ending ||
+      this.rang ||
+      this.connectedAt !== undefined
+    )
+      return;
     this.rang = true;
     this.lifecycle("ringing");
   }
 
   public connection(connected: boolean): void {
-    if (this.terminal) return;
+    if (!this.isCurrent() || this.terminal || this.ending) return;
     if (connected) {
       if (this.connectedAt === undefined) {
         this.connectedAt = this.now();
@@ -131,12 +148,17 @@ export class CallTelemetry {
   }
 
   public participants(count: number): void {
-    if (!this.terminal && Number.isSafeInteger(count))
+    if (
+      this.isCurrent() &&
+      !this.terminal &&
+      !this.ending &&
+      Number.isSafeInteger(count)
+    )
       this.participantsMax = Math.max(this.participantsMax, count);
   }
 
   public correlation(update: CorrelationUpdate): void {
-    if (this.terminal) return;
+    if (!this.canCorrelate()) return;
     this.sessionId = update.canonicalRoot;
     this.options.track({
       ...this.supplementary(),
@@ -146,7 +168,8 @@ export class CallTelemetry {
   }
 
   public fail(failure: Failure): void {
-    if (this.terminal) return;
+    if (!this.isCurrent() || this.terminal || this.ending) return;
+    this.ending = true;
     const phase = this.connectedAt === undefined ? "joining" : "inCall";
     const event = {
       ...this.common,
@@ -158,7 +181,7 @@ export class CallTelemetry {
         : {}),
     };
     this.options.track(event);
-    this.options.reportFailure?.(event);
+    if (this.isCurrent()) this.options.reportFailure?.(event);
     if (this.connectedAt === undefined)
       this.track("CallJoinOutcome", { outcome: "failed" });
     this.lifecycle(
@@ -172,7 +195,8 @@ export class CallTelemetry {
   }
 
   public end(reason: EndReason = "left"): void {
-    if (this.terminal) return;
+    if (!this.isCurrent() || this.terminal || this.ending) return;
+    this.ending = true;
     if (this.connectedAt === undefined) {
       this.track("CallJoinOutcome", {
         outcome: "abandoned",
@@ -184,7 +208,8 @@ export class CallTelemetry {
   }
 
   public permissionRefused(): void {
-    if (this.terminal) return;
+    if (!this.isCurrent() || this.terminal || this.ending) return;
+    this.ending = true;
     if (this.connectedAt === undefined)
       this.track("CallJoinOutcome", { outcome: "permissionRefused" });
     this.finish(
@@ -202,28 +227,61 @@ export class CallTelemetry {
       });
     this.lifecycle("terminated", reason);
     this.terminal = true;
+    this.ending = false;
+    this.correlationReady.complete();
+  }
+
+  public canCorrelate(): boolean {
+    return (
+      this.isCurrent() &&
+      !this.terminal &&
+      !this.ending &&
+      (this.options.lifecycleOwner !== "host" ||
+        this.hostAttemptId !== undefined)
+    );
   }
 
   private lifecycle(phase: CallPhase, reason?: CallReason): void {
-    this.options.track({
-      ...this.supplementary(),
-      eventName: "CallLifecycle",
-      phase,
-      ...(reason === undefined ? {} : { reason }),
-      ...(phase === "connected" || phase === "reconnected"
-        ? { connectionScope: "localMedia" }
-        : {}),
-    });
-    this.options.reportLifecycle?.({
+    if (!this.isCurrent() || this.terminal) return;
+    if (this.options.lifecycleOwner !== "host")
+      this.options.track({
+        ...this.supplementary(),
+        eventName: "CallLifecycle",
+        phase,
+        ...(reason === undefined ? {} : { reason }),
+        ...(phase === "connected" || phase === "reconnected"
+          ? { connectionScope: "localMedia" }
+          : {}),
+      });
+    if (!this.isCurrent() || this.terminal) return;
+    const acknowledgement = this.options.reportLifecycle?.({
       phase,
       componentAttemptId: String(this.common.attemptId),
       ...(reason === undefined ? {} : { reason }),
     });
+    if (acknowledgement !== undefined)
+      void acknowledgement
+        .then((reply) => {
+          if (
+            !this.isCurrent() ||
+            this.terminal ||
+            reply === undefined ||
+            !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+              reply.hostAttemptId,
+            ) ||
+            this.hostAttemptId !== undefined
+          )
+            return;
+          this.hostAttemptId = reply.hostAttemptId;
+          this.correlationReady.next();
+        })
+        .catch(() => {});
   }
 
   private supplementary(): TelemetryEvent {
     return {
       ...this.common,
+      attemptId: this.hostAttemptId ?? this.common.attemptId,
       schemaVersion: 1,
       eventSource: "component",
       sequence: ++this.sequence,
@@ -240,6 +298,11 @@ export class CallTelemetry {
     eventName: string,
     properties: Omit<TelemetryEvent, "eventName"> = {},
   ): void {
+    if (!this.isCurrent()) return;
     this.options.track({ ...this.common, ...properties, eventName });
+  }
+
+  private isCurrent(): boolean {
+    return this.options.isCurrent?.() !== false;
   }
 }

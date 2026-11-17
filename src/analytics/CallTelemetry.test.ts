@@ -7,9 +7,139 @@ Please see LICENSE in the repository root for full details.
 
 import { describe, expect, it, vi } from "vitest";
 
-import { CallTelemetry, type TelemetryEvent } from "./CallTelemetry";
+import {
+  CallTelemetry,
+  type TelemetryEvent,
+  type CallTelemetryOptions,
+} from "./CallTelemetry";
 
 describe("call telemetry attempt", () => {
+  it("never resurrects an invalidated accepted attempt's usage, bridge or error callbacks", () => {
+    let current = true;
+    const bridge = vi.fn();
+    const { call, events, failure } = fixture({
+      isCurrent: () => current,
+      reportLifecycle: bridge,
+    });
+    const count = events.length;
+    const bridgeCount = bridge.mock.calls.length;
+    current = false;
+    call.connection(true);
+    call.ringing();
+    call.fail({
+      cause: "joinTimedOut",
+      stage: "homeserver",
+      step: "membership",
+    });
+    call.end();
+    expect(events).toHaveLength(count);
+    expect(bridge).toHaveBeenCalledTimes(bridgeCount);
+    expect(failure).not.toHaveBeenCalled();
+  });
+
+  it("gates the error callback if usage consent changes synchronously during capture", () => {
+    let current = true;
+    const failure = vi.fn();
+    const call = new CallTelemetry({
+      attemptId,
+      callKind: "dm",
+      componentVersion: "1",
+      hostAppVersion: "1",
+      hostAppBuild: "1",
+      isCurrent: () => current,
+      track: (event) => {
+        if (event.eventName === "CallFailure") current = false;
+      },
+      reportFailure: failure,
+    });
+    call.fail({ cause: "other", stage: "media", step: "unknown" });
+    expect(failure).not.toHaveBeenCalled();
+  });
+
+  it("lets the embedded host own lifecycle/linkage and uses its validated ack only for correlation", async () => {
+    const hostAttemptId = "abcdef01-1234-4234-8234-123456789abc";
+    const bridge = vi.fn().mockResolvedValue({ hostAttemptId });
+    const { call, events } = fixture({
+      lifecycleOwner: "host",
+      reportLifecycle: bridge,
+    });
+    const digest = "a".repeat(64);
+    call.correlation({
+      correlationKind: "binding",
+      participationId: digest,
+      canonicalRoot: digest,
+    });
+    expect(events.map((event) => event.eventName)).toEqual([
+      "CallJoinAttempted",
+    ]);
+    await Promise.resolve();
+    call.correlation({
+      correlationKind: "binding",
+      participationId: digest,
+      canonicalRoot: digest,
+    });
+    call.connection(true);
+    call.end();
+    expect(
+      events.filter((event) => event.eventName === "CallLifecycle"),
+    ).toEqual([]);
+    expect(
+      events.filter((event) => event.correlationKind === "attemptLink"),
+    ).toEqual([]);
+    expect(
+      events.find((event) => event.eventName === "CallCorrelation"),
+    ).toMatchObject({
+      attemptId: hostAttemptId,
+      eventSource: "component",
+      sequence: 1,
+    });
+    expect(
+      events
+        .filter((event) =>
+          [
+            "CallJoinAttempted",
+            "CallJoinOutcome",
+            "CallParticipationEnded",
+          ].includes(event.eventName),
+        )
+        .every((event) => event.attemptId === attemptId),
+    ).toBe(true);
+    expect(bridge.mock.calls.map(([report]) => report.phase)).toEqual([
+      "initiation",
+      "connected",
+      "terminated",
+    ]);
+    expect(
+      bridge.mock.calls.every(
+        ([report]) => report.componentAttemptId === attemptId,
+      ),
+    ).toBe(true);
+  });
+
+  it.each([undefined, { hostAttemptId: "private-raw-id" }])(
+    "fails closed on missing/invalid host ack %s without a duplicate direct lifecycle",
+    async (reply) => {
+      const { call, events } = fixture({
+        lifecycleOwner: "host",
+        reportLifecycle: vi.fn().mockResolvedValue(reply),
+      });
+      await Promise.resolve();
+      expect(call.canCorrelate()).toBe(false);
+      call.connection(true);
+      call.end();
+      expect(
+        events.some(
+          (event) =>
+            event.eventName === "CallLifecycle" ||
+            event.eventName === "CallCorrelation",
+        ),
+      ).toBe(false);
+      expect(
+        events.filter((event) => event.eventName === "CallJoinOutcome"),
+      ).toHaveLength(1);
+    },
+  );
+
   it("uses the native event schema and local media scope without treating initiation as ringing", () => {
     const { call, events, advance } = fixture();
     expect(events.map((event) => event.eventName)).toEqual([
@@ -193,7 +323,7 @@ describe("call telemetry attempt", () => {
 
 const attemptId = "12345678-1234-4234-8234-123456789abc";
 
-function fixture(): {
+function fixture(options: Partial<CallTelemetryOptions> = {}): {
   call: CallTelemetry;
   events: TelemetryEvent[];
   advance(ms: number): void;
@@ -211,6 +341,7 @@ function fixture(): {
     now: () => now,
     track: (event) => events.push(event),
     reportFailure: failure,
+    ...options,
   });
   return {
     call,

@@ -25,6 +25,7 @@ import {
 import { mockConfig } from "../utils/test";
 import { analyticsConfigFromEnvironment } from "../initializer";
 import { optInAnalytics } from "../settings/settings";
+import { CallTelemetry } from "./CallTelemetry";
 
 describe("PosthogAnalytics", () => {
   describe("enablement", () => {
@@ -139,6 +140,22 @@ describe("PosthogAnalytics", () => {
 
     it("reports the jssdk backend when running standalone", () => {
       expect(analyticsConfigFromEnvironment().matrixBackend).toBe("jssdk");
+    });
+
+    it("passes the explicit host usage choice for widgets and leaves standalone choice independent", () => {
+      vi.stubEnv("VITE_PACKAGE", "full");
+      window.location.hash = "#?widgetId=fixture&usageAnalyticsEnabled=true";
+      expect(analyticsConfigFromEnvironment().hostUsageAnalyticsEnabled).toBe(
+        true,
+      );
+      window.location.hash = "#?widgetId=fixture";
+      expect(analyticsConfigFromEnvironment().hostUsageAnalyticsEnabled).toBe(
+        false,
+      );
+      window.location.hash = "#?usageAnalyticsEnabled=true";
+      expect(
+        analyticsConfigFromEnvironment().hostUsageAnalyticsEnabled,
+      ).toBeUndefined();
     });
   });
 
@@ -341,6 +358,7 @@ describe("identifying the user", () => {
       ...credentials,
       matrixBackend: "embedded",
       hostAnalyticsId: "assigned-by-host",
+      hostUsageAnalyticsEnabled: true,
     });
     const identify = vi.spyOn(posthog, "identify");
 
@@ -359,6 +377,7 @@ describe("identifying the user", () => {
       ...credentials,
       matrixBackend: "embedded",
       hostAnalyticsId: "host-id",
+      hostUsageAnalyticsEnabled: true,
     });
     const capture = vi.spyOn(posthog, "capture");
     const analytics = PosthogAnalytics.instance;
@@ -375,6 +394,78 @@ describe("identifying the user", () => {
     });
     expect(capture).toHaveBeenCalledTimes(1);
   });
+
+  it("invalidates an accepted call across opt-out then opt-in while allowing a fresh crash-only attempt", () => {
+    window.matrixclient = mockClient(null);
+    PosthogAnalytics.configure({
+      ...credentials,
+      matrixBackend: "embedded",
+      hostAnalyticsId: "host-id",
+      hostUsageAnalyticsEnabled: true,
+    });
+    const analytics = PosthogAnalytics.instance;
+    const capture = vi.spyOn(posthog, "capture");
+    const failure = vi.fn();
+    const makeCall = (): CallTelemetry => {
+      const isCurrent = analytics.callLifetime();
+      return new CallTelemetry({
+        callKind: "dm",
+        componentVersion: "1",
+        hostAppVersion: "1",
+        hostAppBuild: "1",
+        isCurrent,
+        track: (event) => analytics.trackCallEvent(event),
+        reportFailure: failure,
+      });
+    };
+    const old = makeCall();
+    const count = capture.mock.calls.length;
+    optInAnalytics.setValue(false);
+    optInAnalytics.setValue(true);
+    old.connection(true);
+    old.fail({ cause: "other", stage: "media", step: "unknown" });
+    expect(capture).toHaveBeenCalledTimes(count);
+    expect(failure).not.toHaveBeenCalled();
+    optInAnalytics.setValue(false);
+    const crashOnly = makeCall();
+    crashOnly.fail({
+      cause: "joinTimedOut",
+      stage: "homeserver",
+      step: "membership",
+    });
+    expect(capture).toHaveBeenCalledTimes(count);
+    expect(failure).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["logout", "reset"])(
+    "invalidates late accepted-attempt error callbacks after %s",
+    (action) => {
+      window.matrixclient = mockClient(null);
+      PosthogAnalytics.configure({
+        ...credentials,
+        matrixBackend: "embedded",
+        hostAnalyticsId: "host-id",
+        hostUsageAnalyticsEnabled: true,
+      });
+      const analytics = PosthogAnalytics.instance;
+      const isCurrent = analytics.callLifetime();
+      const failure = vi.fn();
+      const call = new CallTelemetry({
+        callKind: "dm",
+        componentVersion: "1",
+        hostAppVersion: "1",
+        hostAppBuild: "1",
+        isCurrent,
+        track: () => {},
+        reportFailure: failure,
+      });
+      if (action === "logout") analytics.logout();
+      else PosthogAnalytics.resetInstance();
+      call.fail({ cause: "other", stage: "media", step: "unknown" });
+      expect(isCurrent()).toBe(false);
+      expect(failure).not.toHaveBeenCalled();
+    },
+  );
 
   it("keeps its own ID in account data when it owns the session", async () => {
     const client = mockClient(null);
@@ -403,7 +494,11 @@ describe("identifying the user", () => {
 
   it("records how it reaches Matrix as a super property", async () => {
     window.matrixclient = mockClient("stored-earlier");
-    PosthogAnalytics.configure({ ...credentials, matrixBackend: "embedded" });
+    PosthogAnalytics.configure({
+      ...credentials,
+      matrixBackend: "embedded",
+      hostUsageAnalyticsEnabled: true,
+    });
     const register = vi.spyOn(posthog, "register");
 
     PosthogAnalytics.instance.startListeningToSettingsChanges();
