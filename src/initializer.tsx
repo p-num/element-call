@@ -311,9 +311,13 @@ export class Initializer {
             environment,
             release: import.meta.env.VITE_APP_VERSION,
             integrations: [
-              Sentry.rewriteFramesIntegration({
-                iteratee: rewriteEmbeddedCallFrame,
-              }),
+              ...(import.meta.env.VITE_PACKAGE === "embedded"
+                ? [
+                    Sentry.rewriteFramesIntegration({
+                      iteratee: rewriteEmbeddedCallFrame,
+                    }),
+                  ]
+                : []),
               Sentry.reactRouterV7BrowserTracingIntegration({
                 useEffect: React.useEffect,
                 useLocation,
@@ -323,7 +327,10 @@ export class Initializer {
               }),
             ],
             sampleRate: 1.0,
-            tracesSampler: () => (sentryPerformanceEnabled() ? 1.0 : 0.0),
+            tracesSampler: (context) =>
+              sentryPerformanceEnabled() && context.parentSampled !== false
+                ? 1.0
+                : 0.0,
             autoSessionTracking: import.meta.env.VITE_PACKAGE !== "embedded",
             sendDefaultPii: false,
             beforeSend: (event) => (sentryErrorsEnabled() ? event : null),

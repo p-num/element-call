@@ -136,7 +136,8 @@ describe("Initializer", async () => {
               }),
             );
             const options = sentryInitSpy.mock.calls[0][0];
-            expect(options.tracesSampler()).toBe(performance ? 1 : 0);
+            expect(options.tracesSampler({})).toBe(performance ? 1 : 0);
+            expect(options.tracesSampler({ parentSampled: false })).toBe(0);
             const event = { event_id: "test" };
             expect(options.beforeSend(event)).toEqual(errors ? event : null);
             expect(options.beforeSendTransaction(event)).toEqual(
@@ -153,7 +154,7 @@ describe("Initializer", async () => {
           setSentryReportingEnabled(false, false);
           expect(options.beforeSend(event)).toBeNull();
           expect(options.beforeSendTransaction(event)).toBeNull();
-          expect(options.tracesSampler()).toBe(0);
+          expect(options.tracesSampler({ parentSampled: true })).toBe(0);
           setSentryReportingEnabled(true, false);
           expect(options.beforeSend(event)).toBe(event);
           expect(options.beforeSendTransaction(event)).toBeNull();
