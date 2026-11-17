@@ -43,6 +43,7 @@ import {
   configureSentryReporting,
   sentryErrorsEnabled,
   sentryPerformanceEnabled,
+  rewriteEmbeddedCallFrame,
 } from "./analytics/SentryReporting.ts";
 
 // This generates a map of locale names to their URL (based on import.meta.url), which looks like this:
@@ -308,7 +309,11 @@ export class Initializer {
           Sentry.init({
             dsn,
             environment,
+            release: import.meta.env.VITE_APP_VERSION,
             integrations: [
+              Sentry.rewriteFramesIntegration({
+                iteratee: rewriteEmbeddedCallFrame,
+              }),
               Sentry.reactRouterV7BrowserTracingIntegration({
                 useEffect: React.useEffect,
                 useLocation,

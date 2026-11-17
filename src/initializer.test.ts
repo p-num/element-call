@@ -25,6 +25,7 @@ const sentryInitSpy = vi.hoisted(() => vi.fn());
 vi.mock("@sentry/react", () => ({
   init: sentryInitSpy,
   reactRouterV7BrowserTracingIntegration: vi.fn(),
+  rewriteFramesIntegration: vi.fn(),
 }));
 
 describe("Initializer", async () => {
@@ -57,6 +58,7 @@ describe("Initializer", async () => {
       describe("embedded package", () => {
         beforeAll(() => {
           vi.stubEnv("VITE_PACKAGE", "embedded");
+          vi.stubEnv("VITE_APP_VERSION", "call-test-release");
         });
 
         beforeEach(() => {
@@ -96,6 +98,7 @@ describe("Initializer", async () => {
             expect.objectContaining({
               dsn: "https://dsn.example.com.localhost",
               environment: undefined,
+              release: "call-test-release",
             }),
           );
         });
