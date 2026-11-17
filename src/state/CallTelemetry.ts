@@ -5,7 +5,12 @@ SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Element-Commercial
 Please see LICENSE in the repository root for full details.
 */
 
-import { type MatrixClient, type Room } from "matrix-js-sdk";
+import {
+  EventType,
+  type MatrixClient,
+  type MatrixEvent,
+  type Room,
+} from "matrix-js-sdk";
 import {
   CallMembership,
   type MatrixRTCSession,
@@ -162,11 +167,7 @@ export function membershipIdentity(
   room: Room,
   membership: CallMembership,
 ): ParticipationIdentity | undefined {
-  const event =
-    room.findEventById(membership.eventId) ??
-    room.currentState
-      .getStateEvents("org.matrix.msc3401.call.member")
-      .find((event) => event.getId() === membership.eventId);
+  const event = membershipSourceEvent(room, membership.eventId);
   if (event === undefined) return undefined;
   try {
     const parsed = CallMembership.membershipDataFromMatrixEvent(event);
@@ -192,6 +193,28 @@ export function membershipIdentity(
   } catch {
     return undefined;
   }
+}
+
+function membershipSourceEvent(
+  room: Pick<
+    Room,
+    "findEventById" | "_unstable_getStickyEvents" | "currentState"
+  >,
+  eventId: string,
+): MatrixEvent | undefined {
+  const timelineEvent = room.findEventById(eventId);
+  if (timelineEvent !== undefined) return timelineEvent;
+  // Gappy sync can leave memberships only in the same active store MatrixRTCSession reads.
+  for (const event of room._unstable_getStickyEvents()) {
+    if (
+      event.getType() === EventType.RTCMembership &&
+      event.getId() === eventId
+    )
+      return event;
+  }
+  return room.currentState
+    .getStateEvents(EventType.GroupCallMemberPrefix)
+    .find((event) => event.getId() === eventId);
 }
 
 export function classifyCallFailure(error: { code: ErrorCode }): Failure {

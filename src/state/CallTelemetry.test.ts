@@ -5,8 +5,8 @@ SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Element-Commercial
 Please see LICENSE in the repository root for full details.
 */
 
-import { describe, expect, it, vi } from "vitest";
-import { EventType, MatrixEvent, type Room } from "matrix-js-sdk";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createClient, EventType, MatrixEvent, Room } from "matrix-js-sdk";
 import {
   CallMembership,
   type MatrixRTCSession,
@@ -136,27 +136,73 @@ describe("verified participation generation", () => {
     ).toBeUndefined();
   });
 
-  it("uses per-join member ID only for a parsed modern sticky dialect", async () => {
-    const event = new MatrixEvent({
-      type: EventType.RTCMembership,
-      sender: "@alice:example.org",
-      event_id: "$modern",
-      content: {
-        slot_id: "m.call#ROOM",
-        member: {
-          id: "join-generation",
-          user_id: "@alice:example.org",
-          device_id: "AAAA",
-        },
-        application: { type: "m.call" },
-        transports: { published: [], can_subscribe: [] },
-      },
+  describe("the pinned SDK active sticky store", () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-11-17T12:00:00Z"));
     });
-    const membership = await CallMembership.parseFromEvent(event);
-    expect(membershipIdentity(roomWithEvent(event), membership)).toMatchObject({
-      generation: "per-join",
-      memberId: "join-generation",
-      slotId: "m.call#room",
+    afterEach(() => {
+      vi.clearAllTimers();
+      vi.useRealTimers();
+    });
+
+    it("resolves modern per-join identity when a real Room has no matching timeline event", async () => {
+      const room = stickyRoom();
+      const event = modernStickyEvent("$modern", "join-generation");
+      room._unstable_addStickyEvents([event]);
+      const membership = await CallMembership.parseFromEvent(event);
+      expect(room.findEventById(event.getId()!)).toBeUndefined();
+      expect([...room._unstable_getStickyEvents()]).toEqual([event]);
+      expect(membershipIdentity(room, membership)).toMatchObject({
+        generation: "per-join",
+        memberId: "join-generation",
+        slotId: "m.call#room",
+      });
+    });
+
+    it("does not substitute another active event with the same sender/device/member for an exact-ID miss", async () => {
+      const room = stickyRoom();
+      const missing = modernStickyEvent("$missing", "join-generation");
+      const active = modernStickyEvent("$active", "join-generation");
+      room._unstable_addStickyEvents([active]);
+      const membership = await CallMembership.parseFromEvent(missing);
+      expect([...room._unstable_getStickyEvents()]).toEqual([active]);
+      expect(membershipIdentity(room, membership)).toBeUndefined();
+    });
+
+    it("resolves only the current keyed sticky event after replacement", async () => {
+      const room = stickyRoom();
+      const original = modernStickyEvent("$original", "first-join");
+      room._unstable_addStickyEvents([original]);
+      const previous = await CallMembership.parseFromEvent(original);
+      vi.advanceTimersByTime(1);
+      const replacement = modernStickyEvent("$replacement", "next-join");
+      room._unstable_addStickyEvents([replacement]);
+      const current = await CallMembership.parseFromEvent(replacement);
+      expect(room.findEventById(original.getId()!)).toBeUndefined();
+      expect(room.findEventById(replacement.getId()!)).toBeUndefined();
+      expect([...room._unstable_getStickyEvents()]).toEqual([replacement]);
+      expect(membershipIdentity(room, previous)).toBeUndefined();
+      expect(membershipIdentity(room, current)).toMatchObject({
+        generation: "per-join",
+        memberId: "next-join",
+      });
+    });
+
+    it("keeps missing legacy generation unbound despite a timestamped sticky membership for the same device", () => {
+      const room = stickyRoom();
+      const membership = mockRtcMembership("@alice:example.org", "AAAA");
+      room.currentState.setStateEvents([
+        legacyEvent(membership, undefined, Date.now()),
+      ]);
+      room._unstable_addStickyEvents([
+        modernStickyEvent("$other-participation", membership.memberId),
+      ]);
+      expect([...room._unstable_getStickyEvents()]).toHaveLength(1);
+      expect(
+        room.currentState.getStateEvents(EventType.GroupCallMemberPrefix),
+      ).toHaveLength(1);
+      expect(membershipIdentity(room, membership)).toBeUndefined();
     });
   });
 });
@@ -165,6 +211,7 @@ function roomWithEvent(event: MatrixEvent | undefined): Room {
   return mockMatrixRoom({
     roomId: "!fixture:example.org",
     findEventById: vi.fn(() => event),
+    _unstable_getStickyEvents: vi.fn(() => []),
     currentState: { getStateEvents: vi.fn(() => []) } as never,
   });
 }
@@ -175,8 +222,10 @@ function legacyEvent(
   eventTs: number,
 ): MatrixEvent {
   return new MatrixEvent({
+    room_id: "!fixture:example.org",
     sender: membership.userId,
     event_id: membership.eventId,
+    state_key: membership.userId,
     type: EventType.GroupCallMemberPrefix,
     origin_server_ts: eventTs,
     content: {
@@ -186,6 +235,36 @@ function legacyEvent(
       focus_active: { type: "livekit", focus_selection: "multi_sfu" },
       foci_preferred: [],
       ...(timestamp === undefined ? {} : { created_ts: timestamp }),
+    },
+  });
+}
+
+function stickyRoom(): Room {
+  const client = createClient({
+    baseUrl: "https://example.org",
+    userId: "@alice:example.org",
+  });
+  return new Room("!fixture:example.org", client, "@alice:example.org");
+}
+
+function modernStickyEvent(eventId: string, memberId: string): MatrixEvent {
+  return new MatrixEvent({
+    type: EventType.RTCMembership,
+    room_id: "!fixture:example.org",
+    sender: "@alice:example.org",
+    event_id: eventId,
+    origin_server_ts: Date.now(),
+    msc4354_sticky: { duration_ms: 60_000 },
+    content: {
+      msc4354_sticky_key: "AAAA",
+      slot_id: "m.call#ROOM",
+      member: {
+        id: memberId,
+        user_id: "@alice:example.org",
+        device_id: "AAAA",
+      },
+      application: { type: "m.call" },
+      transports: { published: [], can_subscribe: [] },
     },
   });
 }
