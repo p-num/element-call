@@ -476,9 +476,17 @@ describe("local legacy join attribution", () => {
       1234567890,
     );
     expect(first.membership.memberId).toBe(second.membership.memberId);
+    const staleStickyEvent = modernStickyEvent(
+      "$stale-sticky",
+      first.membership.memberId,
+    );
+    const staleSticky = {
+      event: staleStickyEvent,
+      membership: await CallMembership.parseFromEvent(staleStickyEvent),
+    };
 
     const firstBinding = await observeLegacyJoin(firstJoinId, {
-      stale: [older, timestampOnly],
+      stale: [older, timestampOnly, staleSticky],
       first,
       refresh: firstRefresh,
     });
@@ -513,6 +521,7 @@ async function observeLegacyJoin(
   const oldMemberships = stale.map(({ membership }) => membership);
   const memberships = new BehaviorSubject(oldMemberships);
   const session = new MockRTCSession(room).withMemberships(memberships);
+  session.joined = false;
   let activeJoinId: string | undefined;
   Object.defineProperty(session, "localLegacyJoinId", {
     get: () => activeJoinId,
@@ -546,6 +555,7 @@ async function observeLegacyJoin(
     room,
   );
   activeJoinId = joinId;
+  session.joined = true;
   memberships.next([...oldMemberships]);
   expect(digest).not.toHaveBeenCalled();
   digest.mockRestore();

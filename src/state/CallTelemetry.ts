@@ -190,11 +190,13 @@ function isCurrentLocalGeneration(
   session: MatrixRTCSession,
   generation: ParticipationIdentity["generation"],
 ): boolean {
-  if (generation === "per-join") return true;
+  const joinId =
+    "localLegacyJoinId" in session ? session.localLegacyJoinId : undefined;
+  if (generation === "per-join")
+    return joinId === undefined && session.isJoined();
   // Older SDKs never mint an opaque ID for the current legacy join.
   if (!("localLegacyJoinId" in session))
     return generation.startsWith("legacy:");
-  const joinId = session.localLegacyJoinId;
   return typeof joinId === "string" && generation === `legacy-join:${joinId}`;
 }
 
