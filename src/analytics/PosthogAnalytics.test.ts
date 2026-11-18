@@ -14,7 +14,7 @@ import {
   beforeAll,
   afterAll,
 } from "vitest";
-import posthog, { type CaptureResult } from "posthog-js";
+import posthog, { type CaptureResult, PostHog } from "posthog-js";
 import { type MatrixClient } from "matrix-js-sdk";
 
 import {
@@ -384,39 +384,31 @@ describe("identifying the user", () => {
       hostUsageAnalyticsEnabled: true,
       widgetScopedAnalyticsId: true,
     });
-    const init = vi.spyOn(posthog, "init").mockImplementation(() => posthog);
-    const register = vi.spyOn(posthog, "register").mockImplementation(() => {});
+    const sdk = new PostHog();
+    const transport = vi
+      .spyOn(sdk, "_send_retriable_request")
+      .mockImplementation(() => {});
+    vi.spyOn(posthog, "init").mockImplementation((apiKey, config) =>
+      sdk.init(apiKey, {
+        ...config,
+        disable_external_dependency_loading: true,
+        opt_out_useragent_filter: true,
+      }),
+    );
+    const register = vi
+      .spyOn(posthog, "register")
+      .mockImplementation(sdk.register.bind(sdk));
     const identify = vi.spyOn(posthog, "identify");
-    const reset = vi.spyOn(posthog, "reset").mockImplementation(() => {});
+    const reset = vi
+      .spyOn(posthog, "reset")
+      .mockImplementation(sdk.reset.bind(sdk));
+    vi.spyOn(posthog, "capture").mockImplementation(sdk.capture.bind(sdk));
     const analytics = PosthogAnalytics.instance;
-    const config = init.mock.calls[0][1]!;
-    expect(config).toMatchObject({
+    expect(sdk.config).toMatchObject({
       persistence: "memory",
       person_profiles: "never",
       request_batching: false,
     });
-    const beforeSend = config.before_send;
-    if (typeof beforeSend !== "function")
-      throw new Error("Expected a PostHog before_send hook");
-    const captured: CaptureResult[] = [];
-    const capture = vi
-      .spyOn(posthog, "capture")
-      .mockImplementation((event, properties) => {
-        const payload = beforeSend({
-          event,
-          properties: {
-            ...properties,
-            token: credentials.apiKey,
-            distinct_id: widgetId,
-            $process_person_profile: false,
-            $session_id: "sdk-session-id",
-            $device_id: "sdk-device-id",
-            $current_url: "https://call.example/?userId=@user:example.org",
-          },
-        } as CaptureResult);
-        if (payload) captured.push(payload);
-        return payload ?? undefined;
-      });
     analytics.callLifetime();
     analytics.trackCallEvent({ eventName: "CallJoinAttempted" });
     analytics.trackCallEvent({
@@ -432,9 +424,12 @@ describe("identifying the user", () => {
       distinct_id: widgetId,
       $process_person_profile: false,
     };
-    expect(captured).toEqual([
-      { event: "CallJoinAttempted", properties: envelope },
-      {
+    expect(transport.mock.calls.map(([request]) => request.data)).toEqual([
+      expect.objectContaining({
+        event: "CallJoinAttempted",
+        properties: envelope,
+      }),
+      expect.objectContaining({
         event: "CallCorrelation",
         properties: {
           ...envelope,
@@ -442,8 +437,23 @@ describe("identifying the user", () => {
           participationId: "a".repeat(64),
           canonicalRoot: "b".repeat(64),
         },
-      },
+      }),
     ]);
+
+    const calculateProperties = sdk.calculateEventProperties.bind(sdk);
+    const properties = vi.spyOn(sdk, "calculateEventProperties");
+    for (const invalidEnvelope of [
+      { token: "unexpected-project-key" },
+      { $process_person_profile: true },
+      { $process_person_profile: undefined },
+    ]) {
+      properties.mockImplementationOnce((...args) => ({
+        ...calculateProperties(...args),
+        ...invalidEnvelope,
+      }));
+      analytics.trackCallEvent({ eventName: "CallJoinAttempted" });
+    }
+    expect(transport).toHaveBeenCalledTimes(2);
 
     PosthogAnalytics.setUsageAnalyticsEnabled(false);
     analytics.trackCallEvent({ eventName: "CallParticipationEnded" });
@@ -451,13 +461,8 @@ describe("identifying the user", () => {
     analytics.callLifetime();
     analytics.trackCallEvent({ eventName: "CallParticipationEnded" });
     expect(reset).toHaveBeenCalled();
-    expect(capture).toHaveBeenCalledTimes(2);
-    expect(
-      beforeSend({
-        event: "CallParticipationEnded",
-        properties: envelope,
-      } as CaptureResult),
-    ).toBeNull();
+    sdk.capture("CallParticipationEnded", { distinct_id: widgetId });
+    expect(transport).toHaveBeenCalledTimes(2);
   });
 
   it.each([undefined, "@raw:example.org"])(

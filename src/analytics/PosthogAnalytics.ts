@@ -318,7 +318,9 @@ export class PosthogAnalytics {
             !this.hostAnalyticsId ||
             this.anonymity !== Anonymity.Pseudonymous ||
             this.identifiedGeneration !== PosthogAnalytics.callGeneration ||
-            event.properties.distinct_id !== this.hostAnalyticsId
+            event.properties.distinct_id !== this.hostAnalyticsId ||
+            event.properties.token !== apiKey ||
+            event.properties.$process_person_profile !== false
           )
             return null;
           delete event.properties.$session_id;
