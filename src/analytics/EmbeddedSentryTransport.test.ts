@@ -1,0 +1,186 @@
+/*
+Copyright 2026 Element Creations Ltd.
+
+SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Element-Commercial
+Please see LICENSE in the repository root for full details.
+*/
+
+import {
+  BrowserClient,
+  defaultStackParser,
+  httpContextIntegration,
+  makeFetchTransport,
+  Scope,
+  type Event,
+} from "@sentry/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { embeddedSentryTransport } from "./EmbeddedSentryTransport";
+import { setSentryReportingEnabled } from "./SentryReporting";
+
+describe("embedded Sentry requests", () => {
+  const posthogId = "b6bd305a-4af0-4101-8c81-a04fac79f04f";
+  const legacyId = "account-stable-analytics-id";
+  const roomId = "!private:example.org";
+  const userId = "@alice:example.org";
+  const memberId = "private-member-id";
+  const widgetUrl =
+    "https://appassets.androidplatform.net/element-call/index.html?querySecret=private-query" +
+    `#/room/${encodeURIComponent(roomId)}?posthogUserId=${posthogId}&analyticsId=${legacyId}` +
+    `&userId=${encodeURIComponent(userId)}&memberId=${memberId}&password=private-fragment`;
+  const asset = "app:///element-call/assets/index-Xyz.js";
+  const filename =
+    "file:///private/application/Call.bundle/dist/assets/index-Xyz.js";
+  const debugId = "f89a258e-9ab7-4d31-9864-c941e9fc3402";
+  const metadata = { release: "call-test-release", environment: "test" };
+
+  afterEach(() => setSentryReportingEnabled(false, false));
+
+  it.each(["event", "transaction"] as const)(
+    "removes private widget data from the serialized %s",
+    async (type) => {
+      setSentryReportingEnabled(type === "event", type === "transaction");
+      const { client, request } = createClient();
+      client.captureEvent(
+        {
+          ...contaminated(),
+          ...(type === "transaction"
+            ? { type, start_timestamp: 1_700_000_001, timestamp: 1_700_000_002 }
+            : {}),
+        },
+        {},
+        new Scope(),
+      );
+      await client.flush(1_000);
+
+      expect(request).toHaveBeenCalledOnce();
+      const [, options] = request.mock.calls[0];
+      const [header, item, event] = String(options?.body)
+        .split("\n")
+        .map((line) => JSON.parse(line));
+      expect(options?.referrerPolicy).toBe("no-referrer");
+      expect(header).toEqual({
+        event_id: expect.stringMatching(/^[0-9a-f]{32}$/),
+        sent_at: expect.any(String),
+      });
+      expect(item).toEqual({ type });
+      expect(event).toMatchObject(metadata);
+      if (type === "event")
+        expect(event).toMatchObject({
+          exception: {
+            values: [
+              {
+                type: "TypeError",
+                stacktrace: { frames: [{ filename: asset, lineno: 4 }] },
+              },
+            ],
+          },
+          debug_meta: {
+            images: [{ type: "sourcemap", code_file: asset, debug_id: debugId }],
+          },
+        });
+      else
+        expect(event).toMatchObject({
+          transaction: "Element Call",
+          start_timestamp: 1_700_000_001,
+          timestamp: 1_700_000_002,
+          spans: [{ op: "http.client", start_timestamp: 1_700_000_001 }],
+        });
+      for (const value of [
+        widgetUrl,
+        "posthogUserId",
+        posthogId,
+        "analyticsId",
+        legacyId,
+        roomId,
+        encodeURIComponent(roomId),
+        userId,
+        encodeURIComponent(userId),
+        memberId,
+        "private-query",
+        "private-fragment",
+      ]) {
+        expect(String(options?.body)).not.toContain(value);
+      }
+    },
+  );
+
+  it("rechecks crash consent at the transport for an internal SDK error", async () => {
+    setSentryReportingEnabled(false, true);
+    const { client, request } = createClient();
+    client.captureEvent(
+      contaminated(),
+      { data: { __sentry__: true } },
+      new Scope(),
+    );
+    await client.flush(1_000);
+    expect(request).not.toHaveBeenCalled();
+  });
+
+  function createClient() {
+    const request = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValue(new Response("", { status: 200 }));
+    const client = new BrowserClient({
+      ...metadata,
+      dsn: "https://public@example.org/42",
+      stackParser: defaultStackParser,
+      integrations: [httpContextIntegration()],
+      transport: embeddedSentryTransport(
+        (options) => makeFetchTransport(options, request),
+        metadata,
+      ),
+      sendClientReports: false,
+    });
+    client.init();
+    return { client, request };
+  }
+
+  function contaminated(): Event {
+    return {
+      message: widgetUrl,
+      request: { url: widgetUrl, headers: { Referer: widgetUrl } },
+      breadcrumbs: [{ category: "navigation", data: { to: widgetUrl } }],
+      extra: { posthogUserId: posthogId },
+      tags: { roomId },
+      user: { id: userId },
+      transaction: widgetUrl,
+      sdkProcessingMetadata: {
+        dynamicSamplingContext: {
+          transaction: widgetUrl,
+          trace_id: "a".repeat(32),
+          public_key: "public",
+        },
+      },
+      exception: {
+        values: [
+          {
+            type: "TypeError",
+            value: `Could not open ${widgetUrl}`,
+            stacktrace: {
+              frames: [
+                { filename: widgetUrl, lineno: 1 },
+                { filename: `${filename}?query=private-query`, lineno: 4 },
+              ],
+            },
+          },
+        ],
+      },
+      debug_meta: {
+        images: [{ type: "sourcemap", code_file: filename, debug_id: debugId }],
+      },
+      contexts: { call: { roomId, userId, memberId, url: widgetUrl } },
+      spans: [
+        {
+          trace_id: "a".repeat(32),
+          span_id: "b".repeat(16),
+          description: widgetUrl,
+          start_timestamp: 1_700_000_001,
+          timestamp: 1_700_000_002,
+          op: "http.client",
+          data: { url: widgetUrl, memberId },
+        },
+      ],
+    };
+  }
+});

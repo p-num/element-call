@@ -137,6 +137,7 @@ describe("Initializer", async () => {
                 sampleRate: 1,
                 autoSessionTracking: false,
                 sendDefaultPii: false,
+                transport: expect.any(Function),
               }),
             );
             const options = sentryInitSpy.mock.calls[0][0];
@@ -216,6 +217,7 @@ describe("Initializer", async () => {
               environment: "fooEnvironment",
             }),
           );
+          expect(sentryInitSpy.mock.calls[0][0]).not.toHaveProperty("transport");
         });
       });
     });

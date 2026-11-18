@@ -8,7 +8,7 @@ Please see LICENSE in the repository root for full details.
 import posthog, {
   type CaptureOptions,
   type CaptureResult,
-  type PostHog,
+  PostHog,
   type Properties,
 } from "posthog-js";
 import { logger } from "matrix-js-sdk/lib/logger";
@@ -269,10 +269,7 @@ export class PosthogAnalytics {
 
   public static get instance(): PosthogAnalytics {
     if (!this.internalInstance) {
-      this.internalInstance = new PosthogAnalytics(
-        posthog,
-        PosthogAnalytics.analyticsConfig,
-      );
+      this.internalInstance = new PosthogAnalytics(this.analyticsConfig);
     }
     return this.internalInstance;
   }
@@ -288,10 +285,13 @@ export class PosthogAnalytics {
     this.analyticsConfig = analyticsDisabled;
   }
 
-  private constructor(
-    private readonly posthog: PostHog,
-    private readonly config: AnalyticsConfig,
-  ) {
+  private readonly posthog: PostHog;
+
+  private constructor(private readonly config: AnalyticsConfig) {
+    const widgetPosthog = config.widgetScopedAnalyticsId
+      ? new ScopedWidgetPostHog(() => PosthogAnalytics.callGeneration)
+      : undefined;
+    this.posthog = widgetPosthog ?? posthog;
     const hostUsageEnabled =
       PosthogAnalytics.hostUsageOverride ??
       config.hostUsageAnalyticsEnabled === true;
@@ -312,7 +312,7 @@ export class PosthogAnalytics {
 
     if (apiKey && apiHost) {
       const beforeSend = (event: CaptureResult | null): CaptureResult | null => {
-        if (this.config.widgetScopedAnalyticsId) {
+        if (widgetPosthog) {
           if (
             !event ||
             !this.hostAnalyticsId ||
@@ -325,7 +325,9 @@ export class PosthogAnalytics {
             return null;
           delete event.properties.$session_id;
           delete event.properties.$window_id;
-          return santizeSensitiveData(event, Anonymity.Anonymous);
+          const sanitized = santizeSensitiveData(event, Anonymity.Anonymous);
+          if (sanitized) widgetPosthog.authorize(sanitized);
+          return sanitized;
         }
         return santizeSensitiveData(event, this.anonymity);
       };
@@ -341,7 +343,10 @@ export class PosthogAnalytics {
               persistence: "memory",
               person_profiles: "never",
               request_batching: false,
+              // Native compression can defer dispatch past the consent check.
+              disable_compression: true,
               disable_session_recording: true,
+              fetch_options: { referrerPolicy: "no-referrer" },
             }
           : {}),
         before_send: beforeSend,
@@ -697,4 +702,29 @@ export class PosthogAnalytics {
   public eventUndecryptableToDevice = new UndecryptableToDeviceEventTracker();
   public eventQualitySurvey = new QualitySurveyEventTracker();
   public eventCallReconnecting = new CallReconnectingTracker();
+}
+
+class ScopedWidgetPostHog extends PostHog {
+  private readonly authorized = new WeakMap<object, number>();
+
+  public constructor(private readonly currentGeneration: () => number) {
+    super();
+  }
+
+  public authorize(event: CaptureResult): void {
+    this.authorized.set(event, this.currentGeneration());
+  }
+
+  // PostHog 1.408.2 retries this same payload through _send_request without rerunning before_send.
+  public override _send_request(
+    request: Parameters<PostHog["_send_request"]>[0],
+  ): void {
+    const { data } = request;
+    if (
+      typeof data === "object" &&
+      data !== null &&
+      this.authorized.get(data) === this.currentGeneration()
+    )
+      super._send_request(request);
+  }
 }

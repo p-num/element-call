@@ -333,6 +333,8 @@ describe("identifying the user", () => {
     apiKey: "api_key",
     apiHost: "https://api.example.com.localhost",
   };
+  const widgetId = "b6bd305a-4af0-4101-8c81-a04fac79f04f";
+  const replacementWidgetId = "c65d3aa3-e5f8-48f7-b9bc-617538453143";
 
   function mockClient(accountDataId: string | null): MatrixClient {
     return {
@@ -375,41 +377,17 @@ describe("identifying the user", () => {
   });
 
   it("delivers typed mobile boundaries with the ingest envelope and retires the widget identity on opt-out", () => {
-    const widgetId = "b6bd305a-4af0-4101-8c81-a04fac79f04f";
-    window.matrixclient = mockClient(null);
-    PosthogAnalytics.configure({
-      ...credentials,
-      matrixBackend: "embedded",
-      hostAnalyticsId: widgetId,
-      hostUsageAnalyticsEnabled: true,
-      widgetScopedAnalyticsId: true,
-    });
-    const sdk = new PostHog();
-    const transport = vi
-      .spyOn(sdk, "_send_retriable_request")
-      .mockImplementation(() => {});
-    vi.spyOn(posthog, "init").mockImplementation((apiKey, config) =>
-      sdk.init(apiKey, {
-        ...config,
-        disable_external_dependency_loading: true,
-        opt_out_useragent_filter: true,
-      }),
-    );
-    const register = vi
-      .spyOn(posthog, "register")
-      .mockImplementation(sdk.register.bind(sdk));
-    const identify = vi.spyOn(posthog, "identify");
-    const reset = vi
-      .spyOn(posthog, "reset")
-      .mockImplementation(sdk.reset.bind(sdk));
-    vi.spyOn(posthog, "capture").mockImplementation(sdk.capture.bind(sdk));
-    const analytics = PosthogAnalytics.instance;
+    const { init, send } = observePosthogRequests();
+    const register = vi.spyOn(PostHog.prototype, "register");
+    const identify = vi.spyOn(PostHog.prototype, "identify");
+    const reset = vi.spyOn(PostHog.prototype, "reset");
+    const analytics = startScopedWidget(widgetId);
+    const sdk = init.mock.results[0].value as PostHog;
     expect(sdk.config).toMatchObject({
       persistence: "memory",
       person_profiles: "never",
       request_batching: false,
     });
-    analytics.callLifetime();
     analytics.trackCallEvent({ eventName: "CallJoinAttempted" });
     analytics.trackCallEvent({
       eventName: "CallCorrelation",
@@ -424,20 +402,32 @@ describe("identifying the user", () => {
       distinct_id: widgetId,
       $process_person_profile: false,
     };
-    expect(transport.mock.calls.map(([request]) => request.data)).toEqual([
-      expect.objectContaining({
-        event: "CallJoinAttempted",
-        properties: envelope,
-      }),
-      expect.objectContaining({
-        event: "CallCorrelation",
-        properties: {
-          ...envelope,
-          correlationKind: "binding",
-          participationId: "a".repeat(64),
-          canonicalRoot: "b".repeat(64),
-        },
-      }),
+    expect(
+      send.mock.calls.map(([body]) => JSON.parse(String(body))),
+    ).toMatchObject([
+      {
+        api_key: credentials.apiKey,
+        batch: [
+          expect.objectContaining({
+            event: "CallJoinAttempted",
+            properties: envelope,
+          }),
+        ],
+      },
+      {
+        api_key: credentials.apiKey,
+        batch: [
+          expect.objectContaining({
+            event: "CallCorrelation",
+            properties: {
+              ...envelope,
+              correlationKind: "binding",
+              participationId: "a".repeat(64),
+              canonicalRoot: "b".repeat(64),
+            },
+          }),
+        ],
+      },
     ]);
 
     const calculateProperties = sdk.calculateEventProperties.bind(sdk);
@@ -453,7 +443,7 @@ describe("identifying the user", () => {
       }));
       analytics.trackCallEvent({ eventName: "CallJoinAttempted" });
     }
-    expect(transport).toHaveBeenCalledTimes(2);
+    expect(send).toHaveBeenCalledTimes(2);
 
     PosthogAnalytics.setUsageAnalyticsEnabled(false);
     analytics.trackCallEvent({ eventName: "CallParticipationEnded" });
@@ -462,8 +452,47 @@ describe("identifying the user", () => {
     analytics.trackCallEvent({ eventName: "CallParticipationEnded" });
     expect(reset).toHaveBeenCalled();
     sdk.capture("CallParticipationEnded", { distinct_id: widgetId });
-    expect(transport).toHaveBeenCalledTimes(2);
+    expect(send).toHaveBeenCalledTimes(2);
   });
+
+  it.each(["unchanged", "opt-out", "replacement"] as const)(
+    "retries a failed request only while its widget identity is current (%s)",
+    async (transition) => {
+      vi.useFakeTimers();
+      try {
+        let status = 500;
+        const { send } = observePosthogRequests(() => status);
+        startScopedWidget(widgetId).trackCallEvent({
+          eventName: "CallJoinAttempted",
+        });
+        expect(send).toHaveBeenCalledTimes(1);
+
+        status = 200;
+        if (transition === "opt-out") {
+          PosthogAnalytics.setUsageAnalyticsEnabled(false);
+        } else if (transition === "replacement") {
+          PosthogAnalytics.resetInstance();
+          startScopedWidget(replacementWidgetId).trackCallEvent({
+            eventName: "CallJoinAttempted",
+          });
+        }
+
+        await vi.advanceTimersByTimeAsync(6_001);
+        const expectedIds = {
+          unchanged: [widgetId, widgetId],
+          "opt-out": [widgetId],
+          replacement: [widgetId, replacementWidgetId],
+        };
+        expect(
+          send.mock.calls.map(
+            ([body]) => JSON.parse(String(body)).batch[0].properties.distinct_id,
+          ),
+        ).toEqual(expectedIds[transition]);
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
 
   it.each([undefined, "@raw:example.org"])(
     "cannot report from a mobile widget with an absent or invalid identity (%s)",
@@ -476,7 +505,7 @@ describe("identifying the user", () => {
         hostUsageAnalyticsEnabled: true,
         widgetScopedAnalyticsId: true,
       });
-      const capture = vi.spyOn(posthog, "capture");
+      const capture = vi.spyOn(PostHog.prototype, "capture");
       const analytics = PosthogAnalytics.instance;
       analytics.callLifetime();
       analytics.trackCallEvent({ eventName: "CallJoinAttempted" });
@@ -697,4 +726,48 @@ describe("identifying the user", () => {
       ),
     );
   });
+
+  function startScopedWidget(hostAnalyticsId: string): PosthogAnalytics {
+    window.matrixclient = mockClient(null);
+    PosthogAnalytics.configure({
+      ...credentials,
+      matrixBackend: "embedded",
+      hostAnalyticsId,
+      hostUsageAnalyticsEnabled: true,
+      widgetScopedAnalyticsId: true,
+    });
+    const analytics = PosthogAnalytics.instance;
+    analytics.callLifetime();
+    return analytics;
+  }
+
+  function observePosthogRequests(status: () => number = () => 200) {
+    const initPosthog = PostHog.prototype.init;
+    const init = vi.spyOn(PostHog.prototype, "init").mockImplementation(
+      function (this: PostHog, apiKey, config, name) {
+        return initPosthog.call(
+          this,
+          apiKey,
+          {
+            ...config,
+            api_transport: "XHR",
+            opt_out_useragent_filter: true,
+          },
+          name,
+        );
+      },
+    );
+    // PostHog captures fetch at module load. Spy on XHR at the browser boundary instead.
+    const send = vi.spyOn(XMLHttpRequest.prototype, "send").mockImplementation(
+      function (this: XMLHttpRequest) {
+        Object.defineProperties(this, {
+          readyState: { value: XMLHttpRequest.DONE },
+          status: { value: status() },
+          responseText: { value: "{}" },
+        });
+        this.dispatchEvent(new Event("readystatechange"));
+      },
+    );
+    return { init, send };
+  }
 });
