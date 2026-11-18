@@ -106,24 +106,25 @@ export const setPlaybackStarted = (): void => {
   }
 };
 
-let stagedReportingChoices:
-  | {
-      usage?: boolean;
-      sentry?: Parameters<Controls["setSentryReportingEnabled"]>;
-    }
-  | undefined;
+type HostReportingChoices = {
+  usage?: boolean;
+  sentry?: Parameters<Controls["setSentryReportingEnabled"]>;
+};
+
+let hostReporting: HostReportingChoices | "denied" | undefined;
 
 export function deferHostReportingUntilReady(): (
   acknowledgement: Promise<void>,
 ) => Promise<void> {
-  const choices: NonNullable<typeof stagedReportingChoices> = {};
-  stagedReportingChoices = choices;
+  const choices: HostReportingChoices = {};
+  hostReporting = choices;
   return async (acknowledgement) => {
     let timeout: ReturnType<typeof setTimeout> | undefined;
+    let acknowledged = false;
     let acceptedUsageGrant = false;
     try {
       // Native applies the current choices before replying to content_loaded.
-      const acknowledged = await Promise.race([
+      acknowledged = await Promise.race([
         acknowledgement.then(() => true),
         new Promise<false>((resolve) => {
           timeout = setTimeout(() => resolve(false), 2_000);
@@ -137,15 +138,17 @@ export function deferHostReportingUntilReady(): (
     } finally {
       clearTimeout(timeout);
       if (!acceptedUsageGrant) PosthogAnalytics.retireScopedWidgetIdentity();
-      stagedReportingChoices = undefined;
+      // A WebView can finish the pending control evaluations after the widget timed out.
+      hostReporting = acknowledged ? undefined : "denied";
     }
   };
 }
 
 window.controls = {
   setUsageAnalyticsEnabled: (enabled) => {
-    if (stagedReportingChoices) {
-      stagedReportingChoices.usage = enabled;
+    if (hostReporting === "denied") return;
+    if (hostReporting) {
+      hostReporting.usage = enabled;
       // The host supplied a staged ID only after consent. An explicit false revokes it.
       if (enabled === false) PosthogAnalytics.retireScopedWidgetIdentity();
     } else {
@@ -153,8 +156,8 @@ window.controls = {
     }
   },
   setSentryReportingEnabled: (errors, performance) => {
-    if (stagedReportingChoices)
-      stagedReportingChoices.sentry = [errors, performance];
+    if (hostReporting === "denied") return;
+    if (hostReporting) hostReporting.sentry = [errors, performance];
     else setSentryReportingEnabled(errors, performance);
   },
   canEnterPip(): boolean {

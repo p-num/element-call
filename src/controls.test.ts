@@ -52,11 +52,12 @@ describe("native host reporting controls", () => {
     optInAnalytics.setRuntimeValue(false, "host-initial");
     const acknowledgement = Promise.withResolvers<void>();
     const releaseCall = deferHostReportingUntilReady();
-    const callReady = vi.fn(() => [
+    const reporting = () => [
       optInAnalytics.getValue(),
       sentryErrorsEnabled(),
       sentryPerformanceEnabled(),
-    ]);
+    ];
+    const callReady = vi.fn(reporting);
     const ready = releaseCall(acknowledgement.promise).then(callReady);
 
     window.controls.setUsageAnalyticsEnabled(true);
@@ -71,32 +72,58 @@ describe("native host reporting controls", () => {
     acknowledgement.resolve();
     await expect(ready).resolves.toEqual([true, false, true]);
     expect(callReady).toHaveBeenCalledOnce();
+
+    window.controls.setUsageAnalyticsEnabled(false);
+    window.controls.setSentryReportingEnabled(true, false);
+    expect(reporting()).toEqual([false, true, false]);
   });
 
-  it("discards unacknowledged grants and releases the call on timeout", async () => {
-    optInAnalytics.setRuntimeValue(false, "host-initial");
-    vi.useFakeTimers();
-    try {
-      const acknowledgement = Promise.withResolvers<void>();
-      const releaseCall = deferHostReportingUntilReady();
-      const ready = releaseCall(acknowledgement.promise);
-      window.controls.setUsageAnalyticsEnabled(true);
-      window.controls.setSentryReportingEnabled(true, true);
+  it.each(["timeout", "rejection"])(
+    "releases the call with reporting disabled for the document after %s",
+    async (failure) => {
+      const previousControls = window.controls;
+      vi.resetModules();
+      try {
+        const { deferHostReportingUntilReady: deferReporting } =
+          await import("./controls");
+        const sentry = await import("./analytics/SentryReporting");
+        const { optInAnalytics: usage } = await import("./settings/settings");
+        usage.setRuntimeValue(false, "host-initial");
+        vi.useFakeTimers();
+        const acknowledgement = Promise.withResolvers<void>();
+        const releaseCall = deferReporting();
+        const reporting = () => [
+          usage.getValue(),
+          sentry.sentryErrorsEnabled(),
+          sentry.sentryPerformanceEnabled(),
+        ];
+        const callReady = vi.fn(reporting);
+        const ready = releaseCall(acknowledgement.promise).finally(callReady);
+        window.controls.setUsageAnalyticsEnabled(true);
+        window.controls.setSentryReportingEnabled(true, true);
 
-      await vi.advanceTimersByTimeAsync(2_000);
-      await ready;
-      acknowledgement.resolve();
-      await Promise.resolve();
+        if (failure === "timeout") {
+          await vi.advanceTimersByTimeAsync(2_000);
+          await ready;
+          acknowledgement.resolve();
+          await Promise.resolve();
+        } else {
+          const rejected = expect(ready).rejects.toThrow("Widget reply failed");
+          acknowledgement.reject(new Error("Widget reply failed"));
+          await rejected;
+        }
 
-      expect(optInAnalytics.getValue()).toBe(false);
-      expect(sentryErrorsEnabled()).toBe(false);
-      expect(sentryPerformanceEnabled()).toBe(false);
-      window.controls.setSentryReportingEnabled(true, false);
-      expect(sentryErrorsEnabled()).toBe(true);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
+        expect(callReady).toHaveBeenCalledOnce();
+        expect(callReady).toHaveReturnedWith([false, false, false]);
+        window.controls.setUsageAnalyticsEnabled(true);
+        window.controls.setSentryReportingEnabled(true, true);
+        expect(reporting()).toEqual([false, false, false]);
+      } finally {
+        window.controls = previousControls;
+        vi.useRealTimers();
+      }
+    },
+  );
 
   it("keeps a crash-only attempt current through redundant false and later opt-in", () => {
     PosthogAnalytics.configure({
