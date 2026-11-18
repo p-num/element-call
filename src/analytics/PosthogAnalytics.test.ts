@@ -422,35 +422,41 @@ describe("identifying the user", () => {
     });
     expect(register).toHaveBeenCalledWith({ distinct_id: widgetId });
     expect(identify).not.toHaveBeenCalled();
-    const envelope = {
+    const ingestProperties = {
       token: credentials.apiKey,
       distinct_id: widgetId,
       $process_person_profile: false,
+      ...scopedCore,
     };
-    expect(
-      send.mock.calls.map(([body]) => JSON.parse(String(body))),
-    ).toMatchObject([
+    expect(send.mock.calls.map(([body]) => JSON.parse(String(body)))).toEqual([
       {
         api_key: credentials.apiKey,
+        sent_at: expect.any(String),
         batch: [
-          expect.objectContaining({
+          {
             event: "CallJoinAttempted",
-            properties: envelope,
-          }),
+            uuid: expect.any(String),
+            timestamp: expect.any(String),
+            properties: ingestProperties,
+          },
         ],
       },
       {
         api_key: credentials.apiKey,
+        sent_at: expect.any(String),
         batch: [
-          expect.objectContaining({
+          {
             event: "CallCorrelation",
+            uuid: expect.any(String),
+            timestamp: expect.any(String),
             properties: {
-              ...envelope,
+              ...ingestProperties,
+              ...scopedSupplementary,
               correlationKind: "binding",
               participationId: "a".repeat(64),
               canonicalRoot: "b".repeat(64),
             },
-          }),
+          },
         ],
       },
     ]);
@@ -533,12 +539,12 @@ describe("identifying the user", () => {
     expect(send).toHaveBeenCalledOnce();
     expect(JSON.parse(String(send.mock.calls[0][0]))).toEqual({
       api_key: credentials.apiKey,
+      sent_at: expect.any(String),
       batch: [
         {
           event: "CallLifecycle",
           uuid: expect.any(String),
           timestamp: expect.any(String),
-          sent_at: expect.any(String),
           properties: {
             token: credentials.apiKey,
             distinct_id: widgetId,
