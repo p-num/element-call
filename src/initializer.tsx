@@ -44,6 +44,7 @@ import {
   sentryErrorsEnabled,
   sentryErrorsGeneration,
   sentryPerformanceEnabled,
+  rewriteEmbeddedCallFrame,
 } from "./analytics/SentryReporting.ts";
 import { configureCallDiagnostics } from "./analytics/CallDiagnostics.ts";
 
@@ -330,7 +331,15 @@ export class Initializer {
           Sentry.init({
             dsn,
             environment,
+            release: import.meta.env.VITE_APP_VERSION,
             integrations: [
+              ...(import.meta.env.VITE_PACKAGE === "embedded"
+                ? [
+                    Sentry.rewriteFramesIntegration({
+                      iteratee: rewriteEmbeddedCallFrame,
+                    }),
+                  ]
+                : []),
               Sentry.reactRouterV7BrowserTracingIntegration({
                 useEffect: React.useEffect,
                 useLocation,
@@ -340,7 +349,10 @@ export class Initializer {
               }),
             ],
             sampleRate: 1.0,
-            tracesSampler: () => (sentryPerformanceEnabled() ? 1.0 : 0.0),
+            tracesSampler: (context) =>
+              sentryPerformanceEnabled() && context.parentSampled !== false
+                ? 1.0
+                : 0.0,
             autoSessionTracking: import.meta.env.VITE_PACKAGE !== "embedded",
             sendDefaultPii: false,
             beforeSend: (event) => (sentryErrorsEnabled() ? event : null),
@@ -349,8 +361,7 @@ export class Initializer {
           }),
         );
       }
-      // Sentry is now 'loadeed' (even if we actually skipped starting
-      // it due to to not being configured)
+      // Missing configuration or disabled reporting still completes startup.
       this.loadStates.sentry = LoadState.Loaded;
     }
 

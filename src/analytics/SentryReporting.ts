@@ -5,6 +5,8 @@ SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Element-Commercial
 Please see LICENSE in the repository root for full details.
 */
 
+import { type StackFrame } from "@sentry/react";
+
 let errorsEnabled = false;
 let errorsGeneration = 0;
 let performanceEnabled = false;
@@ -43,4 +45,13 @@ export function sentryErrorsGeneration(): number {
 
 export function sentryPerformanceEnabled(): boolean {
   return performanceEnabled;
+}
+
+export function rewriteEmbeddedCallFrame(frame: StackFrame): StackFrame {
+  const asset = frame.filename?.match(
+    /^file:\/\/.*\/dist\/assets\/([^/?#]+\.js)(?:[?#].*)?$/,
+  )?.[1];
+  return asset
+    ? { ...frame, filename: `app:///element-call/assets/${asset}` }
+    : frame;
 }

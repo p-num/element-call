@@ -97,10 +97,17 @@ After content has loaded, apply native preference changes through `window.contro
 
 These parameters are only supported in the [embedded](./embedded_standalone.md) package of Element Call and will be ignored in the [full](./embedded_standalone.md) package.
 
-| Name                 | Values                                                                     | Required | Description                                                                                                                        |
-| -------------------- | -------------------------------------------------------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `posthogApiHost`     | Posthog server URL                                                         | No       | e.g. `https://posthog-element-call.element.io`. Only supported in embedded package. In full package the value from config is used. |
-| `posthogApiKey`      | Posthog project API key                                                    | No       | Only supported in embedded package. In full package the value from config is used.                                                 |
-| `rageshakeSubmitUrl` | Rageshake server URL endpoint                                              | No       | e.g. `https://rageshakes.element.io/api/submit`. In full package the value from config is used.                                    |
-| `sentryDsn`          | Sentry [DSN](https://docs.sentry.io/concepts/key-terms/dsn-explainer/)     | No       | In full package the value from config is used.                                                                                     |
-| `sentryEnvironment`  | Sentry [environment](https://docs.sentry.io/concepts/key-terms/key-terms/) | No       | In full package the value from config is used.                                                                                     |
+| Name                                | Values                                                                     | Required               | Description                                                                                                                        |
+| ----------------------------------- | -------------------------------------------------------------------------- | ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `posthogApiHost`                    | Posthog server URL                                                         | No                     | e.g. `https://posthog-element-call.element.io`. Only supported in embedded package. In full package the value from config is used. |
+| `posthogApiKey`                     | Posthog project API key                                                    | No                     | Only supported in embedded package. In full package the value from config is used.                                                 |
+| `rageshakeSubmitUrl`                | Rageshake server URL endpoint                                              | No                     | e.g. `https://rageshakes.element.io/api/submit`. In full package the value from config is used.                                    |
+| `sentryDsn`                         | Sentry [DSN](https://docs.sentry.io/concepts/key-terms/dsn-explainer/)     | No                     | In full package the value from config is used.                                                                                     |
+| `sentryEnvironment`                 | Sentry [environment](https://docs.sentry.io/concepts/key-terms/key-terms/) | No                     | In full package the value from config is used.                                                                                     |
+| `sentryCrashReportingEnabled`       | `true` or `false`                                                          | No, defaults to `false` | Embedded package only. Controls error reports independently of performance reporting.                                              |
+| `sentryPerformanceReportingEnabled` | `true` or `false`                                                          | No, defaults to `false` | Embedded package only. Controls performance reports independently of error reporting.                                              |
+
+Embedded hosts should pass both reporting flags explicitly alongside their own
+`sentryDsn`. To apply preference changes during a call, use
+`window.controls.setSentryReportingEnabled(errors, performance)`. The client starts
+lazily when either flag becomes enabled; disabling a flag drops its pending reports.

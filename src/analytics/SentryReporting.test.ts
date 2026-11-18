@@ -12,6 +12,7 @@ import {
   sentryErrorsEnabled,
   sentryErrorsGeneration,
   sentryPerformanceEnabled,
+  rewriteEmbeddedCallFrame,
 } from "./SentryReporting";
 
 describe("native Sentry reporting choices", () => {
@@ -30,6 +31,22 @@ describe("native Sentry reporting choices", () => {
     expect(sentryErrorsGeneration()).toBe(accepted + 1);
     setSentryReportingEnabled(false, false);
     expect(sentryErrorsGeneration()).toBe(accepted + 2);
+  });
+
+  it("maps installed iOS resources to the source-map upload prefix", () => {
+    const frame = {
+      filename: "file:///private/app/Call.bundle/dist/assets/index-abc.js",
+      lineno: 42,
+    };
+    expect(rewriteEmbeddedCallFrame(frame)).toEqual({
+      filename: "app:///element-call/assets/index-abc.js",
+      lineno: 42,
+    });
+    const hosted = {
+      filename: "https://call.example/assets/index-abc.js",
+      lineno: 42,
+    };
+    expect(rewriteEmbeddedCallFrame(hosted)).toBe(hosted);
   });
 
   it("starts lazily and revokes each collection channel during a call", () => {
