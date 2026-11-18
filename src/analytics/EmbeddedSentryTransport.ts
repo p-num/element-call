@@ -12,6 +12,7 @@ import {
 } from "@sentry/react";
 
 import {
+  embeddedSentryEnvironment,
   rewriteEmbeddedCallFrame,
   sentryErrorsEnabled,
   sentryPerformanceEnabled,
@@ -63,6 +64,7 @@ function safeEnvelope(
         { type: item.type },
         safeEvent(payload as Event, {
           ...metadata,
+          environment: embeddedSentryEnvironment(metadata.environment),
           event_id: header.event_id,
           type: item.type === "transaction" ? "transaction" : undefined,
         }),
@@ -87,6 +89,10 @@ function safeEvent(
     level: event.level,
     timestamp: event.timestamp,
     start_timestamp: event.start_timestamp,
+    measurements:
+      metadata.type === "transaction"
+        ? safeMeasurements(event.measurements)
+        : undefined,
     transaction: metadata.type === "transaction" ? "Element Call" : undefined,
     message:
       metadata.type === undefined && !exception
@@ -128,6 +134,7 @@ function safeEvent(
               span_id: trace.span_id,
               parent_span_id: safeParentSpanId(trace.parent_span_id),
               op: safeSpanOperation(trace.op),
+              status: safeSpanStatus(trace.status),
             },
           }
         : undefined,
@@ -138,6 +145,8 @@ function safeEvent(
       start_timestamp: span.start_timestamp,
       timestamp: span.timestamp,
       op: safeSpanOperation(span.op),
+      status: safeSpanStatus(span.status),
+      measurements: safeMeasurements(span.measurements),
     })),
   };
 }
@@ -207,4 +216,52 @@ function safeSpanOperation(op?: string): string {
     ].includes(op)
     ? op
     : "other";
+}
+
+function safeSpanStatus(status?: string): string | undefined {
+  return status &&
+    [
+      "ok",
+      "cancelled",
+      "unknown_error",
+      "invalid_argument",
+      "deadline_exceeded",
+      "not_found",
+      "already_exists",
+      "permission_denied",
+      "resource_exhausted",
+      "failed_precondition",
+      "aborted",
+      "out_of_range",
+      "unimplemented",
+      "internal_error",
+      "unavailable",
+      "data_loss",
+      "unauthenticated",
+    ].includes(status)
+    ? status
+    : undefined;
+}
+
+function safeMeasurements(
+  measurements: Event["measurements"],
+): Event["measurements"] {
+  if (!measurements) return undefined;
+  const safe: NonNullable<Event["measurements"]> = {};
+  for (const name of [
+    "cls",
+    "fid",
+    "fp",
+    "fcp",
+    "inp",
+    "lcp",
+    "ttfb",
+    "ttfb.requestTime",
+  ]) {
+    const measurement = measurements[name];
+    const unit = name === "cls" ? "" : "millisecond";
+    if (measurement?.unit === unit && Number.isFinite(measurement.value))
+      safe[name] = { value: measurement.value, unit };
+  }
+  return Object.keys(safe).length > 0 ? safe : undefined;
 }

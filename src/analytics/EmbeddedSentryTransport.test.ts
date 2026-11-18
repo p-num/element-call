@@ -76,7 +76,9 @@ describe("embedded Sentry requests", () => {
             ],
           },
           debug_meta: {
-            images: [{ type: "sourcemap", code_file: asset, debug_id: debugId }],
+            images: [
+              { type: "sourcemap", code_file: asset, debug_id: debugId },
+            ],
           },
         });
       else
@@ -84,7 +86,16 @@ describe("embedded Sentry requests", () => {
           transaction: "Element Call",
           start_timestamp: 1_700_000_001,
           timestamp: 1_700_000_002,
-          spans: [{ op: "http.client", start_timestamp: 1_700_000_001 }],
+          contexts: { trace: { status: "ok" } },
+          spans: [
+            {
+              op: "http.client",
+              start_timestamp: 1_700_000_001,
+              status: "not_found",
+            },
+            { op: "http.client", start_timestamp: 1_700_000_001 },
+          ],
+          measurements: { lcp: { value: 150, unit: "millisecond" } },
         });
       for (const value of [
         widgetUrl,
@@ -117,18 +128,32 @@ describe("embedded Sentry requests", () => {
     expect(request).not.toHaveBeenCalled();
   });
 
-  function createClient() {
+  it("uses the default environment when the input contains a widget URL", async () => {
+    setSentryReportingEnabled(true, false);
+    const { client, request } = createClient(widgetUrl);
+    client.captureEvent({ message: "ordinary error" }, {}, new Scope());
+    await client.flush(1_000);
+    expect(request).toHaveBeenCalledOnce();
+    const body = String(request.mock.calls[0][1]?.body);
+    expect(JSON.parse(body.split("\n")[2])).toMatchObject({
+      environment: "production",
+    });
+    expect(body).not.toContain(widgetUrl);
+  });
+
+  function createClient(environment = metadata.environment) {
     const request = vi
       .fn<typeof globalThis.fetch>()
       .mockResolvedValue(new Response("", { status: 200 }));
     const client = new BrowserClient({
       ...metadata,
+      environment,
       dsn: "https://public@example.org/42",
       stackParser: defaultStackParser,
       integrations: [httpContextIntegration()],
       transport: embeddedSentryTransport(
         (options) => makeFetchTransport(options, request),
-        metadata,
+        { ...metadata, environment },
       ),
       sendClientReports: false,
     });
@@ -169,7 +194,20 @@ describe("embedded Sentry requests", () => {
       debug_meta: {
         images: [{ type: "sourcemap", code_file: filename, debug_id: debugId }],
       },
-      contexts: { call: { roomId, userId, memberId, url: widgetUrl } },
+      contexts: {
+        call: { roomId, userId, memberId, url: widgetUrl },
+        trace: {
+          trace_id: "a".repeat(32),
+          span_id: "c".repeat(16),
+          op: "pageload",
+          status: "ok",
+        },
+      },
+      measurements: {
+        lcp: { value: 150, unit: "millisecond" },
+        fid: { value: 200, unit: widgetUrl },
+        [widgetUrl]: { value: 200, unit: "millisecond" },
+      },
       spans: [
         {
           trace_id: "a".repeat(32),
@@ -178,7 +216,16 @@ describe("embedded Sentry requests", () => {
           start_timestamp: 1_700_000_001,
           timestamp: 1_700_000_002,
           op: "http.client",
+          status: "not_found",
           data: { url: widgetUrl, memberId },
+        },
+        {
+          trace_id: "a".repeat(32),
+          span_id: "d".repeat(16),
+          start_timestamp: 1_700_000_001,
+          timestamp: 1_700_000_002,
+          op: "http.client",
+          status: widgetUrl,
         },
       ],
     };

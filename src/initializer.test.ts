@@ -101,7 +101,7 @@ describe("Initializer", async () => {
           expect(sentryInitSpy).toHaveBeenCalledWith(
             expect.objectContaining({
               dsn: "https://dsn.example.com.localhost",
-              environment: undefined,
+              environment: "production",
               release: "call-test-release",
             }),
           );
@@ -137,6 +137,7 @@ describe("Initializer", async () => {
                 sampleRate: 1,
                 autoSessionTracking: false,
                 sendDefaultPii: false,
+                tracePropagationTargets: [],
                 transport: expect.any(Function),
               }),
             );
@@ -217,7 +218,12 @@ describe("Initializer", async () => {
               environment: "fooEnvironment",
             }),
           );
-          expect(sentryInitSpy.mock.calls[0][0]).not.toHaveProperty("transport");
+          expect(sentryInitSpy.mock.calls[0][0]).not.toHaveProperty(
+            "transport",
+          );
+          expect(sentryInitSpy.mock.calls[0][0]).not.toHaveProperty(
+            "tracePropagationTargets",
+          );
         });
       });
     });

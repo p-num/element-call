@@ -47,6 +47,12 @@ export function sentryPerformanceEnabled(): boolean {
   return performanceEnabled;
 }
 
+export function embeddedSentryEnvironment(environment?: string | null): string {
+  return environment && /^[A-Za-z][A-Za-z0-9_-]{0,31}$/.test(environment)
+    ? environment
+    : "production";
+}
+
 export function rewriteEmbeddedCallFrame(frame: StackFrame): StackFrame {
   const asset = frame.filename?.match(
     /^file:\/\/.*\/dist\/assets\/([^/?#]+\.js)(?:[?#].*)?$/,

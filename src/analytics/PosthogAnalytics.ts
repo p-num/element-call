@@ -28,6 +28,7 @@ import {
 } from "./PosthogEvents";
 import { optInAnalytics } from "../settings/settings";
 import { type TelemetryEvent } from "./CallTelemetry";
+import { projectCallEvent } from "./CallEventProjection";
 
 /* Posthog analytics tracking.
  *
@@ -116,57 +117,9 @@ export function santizeSensitiveData(
   anonymity: Anonymity,
 ): CaptureResult | null {
   if (event === null) return null;
+  const callEvent = projectCallEvent(event);
+  if (callEvent) return callEvent;
   delete event.properties.callId;
-
-  if (
-    [
-      "CallJoinAttempted",
-      "CallJoinOutcome",
-      "CallFailure",
-      "CallParticipationEnded",
-      "CallLifecycle",
-      "CallCorrelation",
-    ].includes(event.event)
-  ) {
-    const allowed = new Set([
-      "token",
-      "distinct_id",
-      "$process_person_profile",
-      "callImplementation",
-      "callPlatform",
-      "callComponentVersion",
-      "attemptId",
-      "callKind",
-      "outcome",
-      "endReason",
-      "cause",
-      "phase",
-      "stage",
-      "step",
-      "durationMs",
-      "participantsMax",
-      "schemaVersion",
-      "eventSource",
-      "sequence",
-      "elapsedMs",
-      "hostAppVersion",
-      "hostAppBuild",
-      "correlationState",
-      "sessionId",
-      "reason",
-      "connectionScope",
-      "correlationKind",
-      "participationId",
-      "canonicalRoot",
-      "participantA",
-      "participantB",
-      "previousRoot",
-    ]);
-    for (const key of Object.keys(event.properties))
-      if (!allowed.has(key)) delete event.properties[key];
-    delete event.$set;
-    delete event.$set_once;
-  }
 
   stripSensitiveFields(event.properties, anonymity);
   // posthog can stash person-profile updates either at the top level
@@ -303,7 +256,6 @@ export class PosthogAnalytics {
     )
       this.hostAnalyticsId = null;
     if (
-      config.matrixBackend === "embedded" ||
       config.hostUsageAnalyticsEnabled !== undefined ||
       PosthogAnalytics.hostUsageOverride !== undefined
     )
@@ -311,7 +263,9 @@ export class PosthogAnalytics {
     const { apiKey, apiHost } = config;
 
     if (apiKey && apiHost) {
-      const beforeSend = (event: CaptureResult | null): CaptureResult | null => {
+      const beforeSend = (
+        event: CaptureResult | null,
+      ): CaptureResult | null => {
         if (widgetPosthog) {
           if (
             !event ||
@@ -323,9 +277,7 @@ export class PosthogAnalytics {
             event.properties.$process_person_profile !== false
           )
             return null;
-          delete event.properties.$session_id;
-          delete event.properties.$window_id;
-          const sanitized = santizeSensitiveData(event, Anonymity.Anonymous);
+          const sanitized = projectCallEvent(event, true);
           if (sanitized) widgetPosthog.authorize(sanitized);
           return sanitized;
         }
@@ -345,6 +297,7 @@ export class PosthogAnalytics {
               request_batching: false,
               // Native compression can defer dispatch past the consent check.
               disable_compression: true,
+              disable_beacon: true,
               disable_session_recording: true,
               fetch_options: { referrerPolicy: "no-referrer" },
             }

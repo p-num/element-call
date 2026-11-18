@@ -41,6 +41,7 @@ import {
 import { i18n, languageOfLocalePath } from "./utils/i18n.ts";
 import {
   configureSentryReporting,
+  embeddedSentryEnvironment,
   sentryErrorsEnabled,
   sentryErrorsGeneration,
   sentryPerformanceEnabled,
@@ -122,18 +123,14 @@ export function analyticsConfigFromEnvironment(): AnalyticsConfig {
     hostCallTelemetryEnabled,
     isWidget,
   } = getUrlParams();
+  const embedded = import.meta.env.VITE_PACKAGE === "embedded";
   return {
     matrixBackend: isWidget ? "embedded" : "jssdk",
     hostAnalyticsId: posthogUserId,
-    widgetScopedAnalyticsId:
-      isWidget &&
-      hostCallTelemetryEnabled &&
-      import.meta.env.VITE_PACKAGE === "embedded",
-    ...(isWidget || import.meta.env.VITE_PACKAGE === "embedded"
-      ? { hostUsageAnalyticsEnabled: usageAnalyticsEnabled }
-      : {}),
-    ...(import.meta.env.VITE_PACKAGE === "embedded"
+    widgetScopedAnalyticsId: embedded && isWidget && hostCallTelemetryEnabled,
+    ...(embedded
       ? {
+          hostUsageAnalyticsEnabled: usageAnalyticsEnabled,
           apiKey: posthogApiKey ?? undefined,
           apiHost: posthogApiHost ?? undefined,
         }
@@ -313,7 +310,9 @@ export class Initializer {
       if (embedded) {
         // for the embedded package we always use the values from the URL as the widget host is responsible for analytics configuration
         dsn = getUrlParams().sentryDsn ?? undefined;
-        environment = getUrlParams().sentryEnvironment ?? undefined;
+        environment = embeddedSentryEnvironment(
+          getUrlParams().sentryEnvironment,
+        );
         errors = getUrlParams().sentryCrashReportingEnabled;
         performance = getUrlParams().sentryPerformanceReportingEnabled;
       }
@@ -337,6 +336,7 @@ export class Initializer {
             release,
             ...(embedded
               ? {
+                  tracePropagationTargets: [],
                   transport: embeddedSentryTransport(
                     Sentry.makeFetchTransport,
                     { release, environment },

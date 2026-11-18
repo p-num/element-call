@@ -102,6 +102,19 @@ describe("PosthogAnalytics", () => {
         mockConfig(configCredentials);
         expect(analyticsConfigFromEnvironment().apiKey).toBeUndefined();
       });
+
+      it.each([undefined, "true", "false", "TRUE"])(
+        "uses the native host's exact usage choice (%s)",
+        (choice) => {
+          window.location.hash =
+            `#?widgetId=fixture&parentUrl=https://host.example.com&hostCallTelemetryEnabled=true` +
+            (choice === undefined ? "" : `&usageAnalyticsEnabled=${choice}`);
+          expect(analyticsConfigFromEnvironment()).toMatchObject({
+            widgetScopedAnalyticsId: true,
+            hostUsageAnalyticsEnabled: choice === "true",
+          });
+        },
+      );
     });
 
     describe("full package", () => {
@@ -142,22 +155,16 @@ describe("PosthogAnalytics", () => {
       expect(analyticsConfigFromEnvironment().matrixBackend).toBe("jssdk");
     });
 
-    it("passes the explicit host usage choice for widgets and leaves standalone choice independent", () => {
-      vi.stubEnv("VITE_PACKAGE", "full");
-      const widgetParams = `widgetId=fixture&parentUrl=${encodeURIComponent("https://host.example.com.localhost")}`;
-      window.location.hash = `#?${widgetParams}&usageAnalyticsEnabled=true`;
-      expect(analyticsConfigFromEnvironment().hostUsageAnalyticsEnabled).toBe(
-        true,
-      );
-      window.location.hash = `#?${widgetParams}`;
-      expect(analyticsConfigFromEnvironment().hostUsageAnalyticsEnabled).toBe(
-        false,
-      );
-      window.location.hash = "#?usageAnalyticsEnabled=true";
-      expect(
-        analyticsConfigFromEnvironment().hostUsageAnalyticsEnabled,
-      ).toBeUndefined();
-    });
+    it.each(["widgetId=fixture&parentUrl=https://host.example.com&", ""])(
+      "keeps the full package usage choice independent of embedded URL flags (%s)",
+      (widgetParams) => {
+        vi.stubEnv("VITE_PACKAGE", "full");
+        window.location.hash = `#?${widgetParams}usageAnalyticsEnabled=true`;
+        expect(
+          analyticsConfigFromEnvironment().hostUsageAnalyticsEnabled,
+        ).toBeUndefined();
+      },
+    );
   });
 
   describe("applyPrivacyFilters", () => {
@@ -173,19 +180,19 @@ describe("PosthogAnalytics", () => {
           $device_id: "secret",
           $referrer: "secret",
           $set: { token: "secret" },
-          token: "secret",
+          token: "project-key",
         },
         $set: { token: "secret" },
         $set_once: { token: "secret" },
       } as unknown as CaptureResult;
-      expect(
-        santizeSensitiveData(event, Anonymity.Pseudonymous)?.properties,
-      ).toEqual({
+      const safe = santizeSensitiveData(event, Anonymity.Pseudonymous);
+      expect(safe?.properties).toEqual({
         distinct_id: "consented-analytics-id",
         schemaVersion: 1,
         phase: "connected",
+        token: "project-key",
       });
-      expect(JSON.stringify(event)).not.toContain("secret");
+      expect(JSON.stringify(safe)).not.toContain("secret");
     });
     const makeEvent = (properties: Record<string, unknown>): CaptureResult =>
       ({ event: "anyEvent", properties }) as unknown as CaptureResult;
@@ -335,6 +342,22 @@ describe("identifying the user", () => {
   };
   const widgetId = "b6bd305a-4af0-4101-8c81-a04fac79f04f";
   const replacementWidgetId = "c65d3aa3-e5f8-48f7-b9bc-617538453143";
+  const scopedCore = {
+    callImplementation: "embedded",
+    callPlatform: "web",
+    callComponentVersion: import.meta.env.VITE_APP_VERSION || "dev",
+    attemptId: "168cd40b-2376-4e14-887d-3008e7ee58d4",
+    callKind: "dm",
+  };
+  const scopedSupplementary = {
+    schemaVersion: 1,
+    eventSource: "component",
+    sequence: 3,
+    elapsedMs: 120,
+    hostAppVersion: "unknown",
+    hostAppBuild: "unknown",
+    correlationState: "unbound",
+  };
 
   function mockClient(accountDataId: string | null): MatrixClient {
     return {
@@ -356,14 +379,13 @@ describe("identifying the user", () => {
     optInAnalytics.setValue(true);
   });
 
-  it("reports under the ID its host assigned, and stores nothing", async () => {
+  it("keeps the saved usage choice and the host identity in a full-package widget", async () => {
     const client = mockClient(null);
     window.matrixclient = client;
     PosthogAnalytics.configure({
       ...credentials,
       matrixBackend: "embedded",
       hostAnalyticsId: "assigned-by-host",
-      hostUsageAnalyticsEnabled: true,
     });
     const identify = vi.spyOn(posthog, "identify");
 
@@ -371,6 +393,7 @@ describe("identifying the user", () => {
     await vi.waitFor(() =>
       expect(identify).toHaveBeenCalledWith("assigned-by-host"),
     );
+    expect(optInAnalytics.getValue()).toBe(true);
 
     // The host owns the user's account, so Element Call must not write to it
     expect(client.setAccountData).not.toHaveBeenCalled();
@@ -388,9 +411,11 @@ describe("identifying the user", () => {
       person_profiles: "never",
       request_batching: false,
     });
-    analytics.trackCallEvent({ eventName: "CallJoinAttempted" });
+    analytics.trackCallEvent({ eventName: "CallJoinAttempted", ...scopedCore });
     analytics.trackCallEvent({
       eventName: "CallCorrelation",
+      ...scopedCore,
+      ...scopedSupplementary,
       correlationKind: "binding",
       participationId: "a".repeat(64),
       canonicalRoot: "b".repeat(64),
@@ -441,18 +466,91 @@ describe("identifying the user", () => {
         ...calculateProperties(...args),
         ...invalidEnvelope,
       }));
-      analytics.trackCallEvent({ eventName: "CallJoinAttempted" });
+      analytics.trackCallEvent({
+        eventName: "CallJoinAttempted",
+        ...scopedCore,
+      });
     }
     expect(send).toHaveBeenCalledTimes(2);
 
     PosthogAnalytics.setUsageAnalyticsEnabled(false);
-    analytics.trackCallEvent({ eventName: "CallParticipationEnded" });
+    analytics.trackCallEvent({ eventName: "CallJoinAttempted", ...scopedCore });
     PosthogAnalytics.setUsageAnalyticsEnabled(true);
     analytics.callLifetime();
-    analytics.trackCallEvent({ eventName: "CallParticipationEnded" });
+    analytics.trackCallEvent({ eventName: "CallJoinAttempted", ...scopedCore });
     expect(reset).toHaveBeenCalled();
-    sdk.capture("CallParticipationEnded", { distinct_id: widgetId });
+    sdk.capture("CallJoinAttempted", { ...scopedCore, distinct_id: widgetId });
     expect(send).toHaveBeenCalledTimes(2);
+  });
+
+  it("projects only issue #411 events onto the mobile widget wire payload", async () => {
+    const { init, send } = observePosthogRequests();
+    const analytics = startScopedWidget(widgetId);
+    const sdk = init.mock.results[0].value as PostHog;
+    const privateUrl =
+      "https://call.example/private-room?token=widget-url-secret#widgetId=private-widget-id";
+    sdk.register({
+      $current_url: privateUrl,
+      $pathname: "/private-room",
+      $session_entry_pathname: "/private-room",
+      $session_entry_utm_source: "private-widget-id",
+      arbitrarySuperProperty: privateUrl,
+    });
+    analytics.eventCallStarted.track("!private-room:example.com");
+    analytics.eventQualitySurvey.track(
+      "!private-room:example.com",
+      "private feedback text",
+      4,
+    );
+    sdk.capture("UnexpectedEvent", { widgetId: "private-widget-id" });
+    sdk.capture("CallJoinAttempted", { ...scopedCore, attemptId: privateUrl });
+    sdk.capture("CallJoinOutcome", { ...scopedCore, outcome: privateUrl });
+    sdk.capture("CallLifecycle", {
+      ...scopedCore,
+      ...scopedSupplementary,
+      phase: "connected",
+      hostAppVersion: privateUrl,
+    });
+    sdk.capture(
+      "CallLifecycle",
+      {
+        ...scopedCore,
+        ...scopedSupplementary,
+        phase: "connected",
+        connectionScope: "localMedia",
+        reason: privateUrl,
+        widgetId: "private-widget-id",
+        cause: privateUrl,
+      },
+      {
+        $set: { url: privateUrl },
+        $set_once: { url: privateUrl },
+        $unset: [privateUrl],
+      },
+    );
+
+    await Promise.resolve();
+    expect(send).toHaveBeenCalledOnce();
+    expect(JSON.parse(String(send.mock.calls[0][0]))).toEqual({
+      api_key: credentials.apiKey,
+      batch: [
+        {
+          event: "CallLifecycle",
+          uuid: expect.any(String),
+          timestamp: expect.any(String),
+          sent_at: expect.any(String),
+          properties: {
+            token: credentials.apiKey,
+            distinct_id: widgetId,
+            $process_person_profile: false,
+            ...scopedCore,
+            ...scopedSupplementary,
+            phase: "connected",
+            connectionScope: "localMedia",
+          },
+        },
+      ],
+    });
   });
 
   it.each(["unchanged", "opt-out", "replacement"] as const)(
@@ -464,6 +562,7 @@ describe("identifying the user", () => {
         const { send } = observePosthogRequests(() => status);
         startScopedWidget(widgetId).trackCallEvent({
           eventName: "CallJoinAttempted",
+          ...scopedCore,
         });
         expect(send).toHaveBeenCalledTimes(1);
 
@@ -474,6 +573,7 @@ describe("identifying the user", () => {
           PosthogAnalytics.resetInstance();
           startScopedWidget(replacementWidgetId).trackCallEvent({
             eventName: "CallJoinAttempted",
+            ...scopedCore,
           });
         }
 
@@ -485,7 +585,8 @@ describe("identifying the user", () => {
         };
         expect(
           send.mock.calls.map(
-            ([body]) => JSON.parse(String(body)).batch[0].properties.distinct_id,
+            ([body]) =>
+              JSON.parse(String(body)).batch[0].properties.distinct_id,
           ),
         ).toEqual(expectedIds[transition]);
       } finally {
@@ -743,8 +844,9 @@ describe("identifying the user", () => {
 
   function observePosthogRequests(status: () => number = () => 200) {
     const initPosthog = PostHog.prototype.init;
-    const init = vi.spyOn(PostHog.prototype, "init").mockImplementation(
-      function (this: PostHog, apiKey, config, name) {
+    const init = vi
+      .spyOn(PostHog.prototype, "init")
+      .mockImplementation(function (this: PostHog, apiKey, config, name) {
         return initPosthog.call(
           this,
           apiKey,
@@ -755,19 +857,18 @@ describe("identifying the user", () => {
           },
           name,
         );
-      },
-    );
+      });
     // PostHog captures fetch at module load. Spy on XHR at the browser boundary instead.
-    const send = vi.spyOn(XMLHttpRequest.prototype, "send").mockImplementation(
-      function (this: XMLHttpRequest) {
+    const send = vi
+      .spyOn(XMLHttpRequest.prototype, "send")
+      .mockImplementation(function (this: XMLHttpRequest) {
         Object.defineProperties(this, {
           readyState: { value: XMLHttpRequest.DONE },
           status: { value: status() },
           responseText: { value: "{}" },
         });
         this.dispatchEvent(new Event("readystatechange"));
-      },
-    );
+      });
     return { init, send };
   }
 });
