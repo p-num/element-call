@@ -27,6 +27,20 @@ import { analyticsConfigFromEnvironment } from "../initializer";
 import { optInAnalytics } from "../settings/settings";
 import { CallTelemetry } from "./CallTelemetry";
 
+const browserFetch = vi.hoisted(() =>
+  vi.fn<typeof fetch>(async () => Promise.resolve(new Response("{}"))),
+);
+
+// The browser bundle binds Fetch at import. The global test setup loads the separate Node entry.
+vi.mock("posthog-js", async () => {
+  vi.stubGlobal("fetch", browserFetch);
+  try {
+    return await import("posthog-js/dist/module.js");
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
+
 describe("PosthogAnalytics", () => {
   describe("enablement", () => {
     beforeEach(() => {
@@ -397,6 +411,47 @@ describe("identifying the user", () => {
 
     // The host owns the user's account, so Element Call must not write to it
     expect(client.setAccountData).not.toHaveBeenCalled();
+  });
+
+  it("sends scoped requests and their retries through fetch without a referrer", async () => {
+    vi.useFakeTimers();
+    browserFetch.mockClear();
+    browserFetch.mockResolvedValueOnce(new Response("{}", { status: 500 }));
+    try {
+      startScopedWidget(widgetId).trackCallEvent({
+        eventName: "CallJoinAttempted",
+        ...scopedCore,
+      });
+      expect(browserFetch).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(6_001);
+      expect(browserFetch).toHaveBeenCalledTimes(2);
+      for (const [url, options] of browserFetch.mock.calls) {
+        expect(url).toEqual(expect.stringContaining(`${credentials.apiHost}/`));
+        expect(options).toMatchObject({
+          method: "POST",
+          referrerPolicy: "no-referrer",
+          body: expect.any(String),
+        });
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("drops scoped requests when fetch is unavailable", () => {
+    browserFetch.mockClear();
+    const send = vi.spyOn(XMLHttpRequest.prototype, "send");
+    vi.stubGlobal("fetch", undefined);
+    try {
+      startScopedWidget(widgetId).trackCallEvent({
+        eventName: "CallJoinAttempted",
+        ...scopedCore,
+      });
+      expect(browserFetch).not.toHaveBeenCalled();
+      expect(send).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("delivers typed mobile boundaries with the ingest envelope and retires the widget identity on opt-out", () => {
@@ -858,13 +913,22 @@ describe("identifying the user", () => {
           apiKey,
           {
             ...config,
-            api_transport: "XHR",
             opt_out_useragent_filter: true,
           },
           name,
         );
       });
-    // PostHog captures fetch at module load. Spy on XHR at the browser boundary instead.
+    // Select XHR at SDK dispatch to exercise XMLHttpRequest.send serialization.
+    const sendRequest = PostHog.prototype._send_request;
+    vi.spyOn(PostHog.prototype, "_send_request").mockImplementation(
+      function (this: PostHog, options) {
+        sendRequest.call(this, {
+          ...options,
+          transport: "XHR",
+          disableTransport: ["sendBeacon"],
+        });
+      },
+    );
     const send = vi
       .spyOn(XMLHttpRequest.prototype, "send")
       .mockImplementation(function (this: XMLHttpRequest) {

@@ -297,9 +297,7 @@ export class PosthogAnalytics {
               request_batching: false,
               // Native compression can defer dispatch past the consent check.
               disable_compression: true,
-              disable_beacon: true,
               disable_session_recording: true,
-              fetch_options: { referrerPolicy: "no-referrer" },
             }
           : {}),
         before_send: beforeSend,
@@ -674,10 +672,24 @@ class ScopedWidgetPostHog extends PostHog {
   ): void {
     const { data } = request;
     if (
-      typeof data === "object" &&
-      data !== null &&
-      this.authorized.get(data) === this.currentGeneration()
+      typeof data !== "object" ||
+      data === null ||
+      this.authorized.get(data) !== this.currentGeneration() ||
+      typeof globalThis.fetch !== "function"
     )
-      super._send_request(request);
+      return;
+
+    // The pinned SDK forwards the entire fetchOptions object to browser Fetch.
+    const fetchOptions = {
+      ...request.fetchOptions,
+      referrerPolicy: "no-referrer",
+    } satisfies RequestInit;
+    super._send_request({
+      ...request,
+      fetchOptions,
+      transport: "fetch",
+      // PostHog otherwise falls back to a transport without referrerPolicy.
+      disableTransport: ["XHR", "sendBeacon"],
+    });
   }
 }
