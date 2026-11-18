@@ -10,11 +10,29 @@ import {
   configureSentryReporting,
   setSentryReportingEnabled,
   sentryErrorsEnabled,
+  sentryErrorsGeneration,
   sentryPerformanceEnabled,
   rewriteEmbeddedCallFrame,
 } from "./SentryReporting";
 
 describe("native Sentry reporting choices", () => {
+  it("advances the crash generation only when crash reporting is revoked", () => {
+    setSentryReportingEnabled(true, false);
+    const accepted = sentryErrorsGeneration();
+    setSentryReportingEnabled(true, true);
+    setSentryReportingEnabled(true, false);
+    expect(sentryErrorsGeneration()).toBe(accepted);
+    setSentryReportingEnabled(false, false);
+    expect(sentryErrorsGeneration()).toBe(accepted + 1);
+    setSentryReportingEnabled(false, true);
+    expect(sentryErrorsGeneration()).toBe(accepted + 1);
+    setSentryReportingEnabled(true, false);
+    expect(sentryErrorsEnabled()).toBe(true);
+    expect(sentryErrorsGeneration()).toBe(accepted + 1);
+    setSentryReportingEnabled(false, false);
+    expect(sentryErrorsGeneration()).toBe(accepted + 2);
+  });
+
   it("maps installed iOS resources to the source-map upload prefix", () => {
     const frame = {
       filename: "file:///private/app/Call.bundle/dist/assets/index-abc.js",
@@ -30,9 +48,13 @@ describe("native Sentry reporting choices", () => {
     };
     expect(rewriteEmbeddedCallFrame(hosted)).toBe(hosted);
   });
+
   it("starts lazily and revokes each collection channel during a call", () => {
     const start = vi.fn();
-    configureSentryReporting(false, false, start);
+    configureSentryReporting(
+      { errors: false, performance: false, embedded: true },
+      start,
+    );
     expect(start).not.toHaveBeenCalled();
     setSentryReportingEnabled(true, false);
     expect(start).toHaveBeenCalledTimes(1);

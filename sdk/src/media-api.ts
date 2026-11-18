@@ -15,6 +15,13 @@ import { type Observable } from "rxjs";
 
 import { type Behavior } from "./reactive/Behavior";
 
+/** Evidence for the microphone requested at join, independent of receiving media. */
+export type InitialMicrophonePublication =
+  | { kind: "notRequested" }
+  | { kind: "pending" }
+  | { kind: "published" }
+  | { kind: "failed"; error: Error };
+
 export interface AudioCaptureSettings {
   echoCancellation?: boolean;
   noiseSuppression?: boolean;

@@ -58,6 +58,12 @@ export class Setting<T> {
     return this._value$.getValue();
   };
 
+  /** Host choices apply to this runtime without replacing a standalone user's saved choice. */
+  public setRuntimeValue(value: T, reason?: string): void {
+    this._value$.next(value);
+    this._lastUpdateReason$.next(reason ?? null);
+  }
+
   /**
    * Update the setting's value from a config source, but only if the user
    * hasn't explicitly set a value in localStorage. This lets admins set

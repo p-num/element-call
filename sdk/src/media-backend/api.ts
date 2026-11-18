@@ -20,6 +20,7 @@ import { type Observable } from "rxjs";
 import { type ResolvedTransport, type RTCMember } from "../api";
 import {
   type LocalAudioMediaTrack,
+  type InitialMicrophonePublication,
   type LocalMemberMedia,
   type LocalVideoMediaTrack,
   type MediaSource,
@@ -181,6 +182,11 @@ export interface LocalMediaBackend extends LocalMemberMedia {
   setPublishing(publish: boolean): void;
   /** The first failure to publish, kept until the session ends. Not fatal. */
   readonly publishError$: Behavior<Error | null>;
+  /**
+   * Publication-promise evidence, where the backend can distinguish it from
+   * track appearance. Otherwise the participation observes its microphone track.
+   */
+  readonly initialMicrophonePublication$?: Behavior<InitialMicrophonePublication>;
 
   /**
    * Publishes a source and resolves with its track once it is in `tracks$`.

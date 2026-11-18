@@ -120,6 +120,10 @@ import { type DeveloperSettingsSnapshot } from "../settings/DeveloperSettingsTab
 import { type ViewModel } from "../state/ViewModel.ts";
 import { RingingStatus } from "../tile/RingingStatus.tsx";
 import { RingingAudioRenderer } from "./RingingAudioRenderer.tsx";
+import {
+  createCallTelemetry,
+  observeCallTelemetry,
+} from "../state/CallTelemetry";
 
 declare module "react" {
   interface CSSProperties {
@@ -140,6 +144,7 @@ export interface ActiveCallProps extends Omit<
 }
 
 export const ActiveCall: FC<ActiveCallProps> = (props) => {
+  const { onLeft } = props;
   const [vm, setVm] = useState<CallViewModel | null>(null);
   const [footerVm, setFooterVm] = useState<ViewModel<FooterSnapshot> | null>(
     null,
@@ -162,15 +167,50 @@ export const ActiveCall: FC<ActiveCallProps> = (props) => {
       urlParams;
 
     const capture = captureSettings();
+    const telemetry = createCallTelemetry(
+      props.client,
+      props.matrixRoom,
+      hostBridge,
+      urlParams.hostCallTelemetryEnabled,
+    );
+    const sentCallNotification$ = createSentCallNotification$(
+      scope,
+      props.rtcSession,
+    );
     const slot = createRTCSlot(
       scope,
       props.client,
       props.matrixRoom,
       rtcSlotOptions(props.e2eeSystem),
     );
-    const rtcParticipation = slot.join({
-      ...rtcParticipationOptions(urlParams),
-      publish: initialPublishRequests(props.muteStates, mediaDevices, capture),
+    const rtcParticipation = (() => {
+      try {
+        return slot.join({
+          ...rtcParticipationOptions(urlParams),
+          publish: initialPublishRequests(
+            props.muteStates,
+            mediaDevices,
+            capture,
+          ),
+        });
+      } catch (error) {
+        telemetry.fail({ cause: "other", stage: "media", step: "unknown" });
+        throw error;
+      }
+    })();
+    observeCallTelemetry(
+      scope,
+      telemetry,
+      rtcParticipation,
+      props.rtcSession,
+      props.matrixRoom,
+    );
+    sentCallNotification$.pipe(scope.bind()).subscribe((notification) => {
+      if (
+        notification?.notification_type === "ring" &&
+        notification.lifetime > 0
+      )
+        telemetry.ringing();
     });
 
     const vm = createCallViewModel$(
@@ -189,10 +229,7 @@ export const ActiveCall: FC<ActiveCallProps> = (props) => {
         hostBridge,
         autoLeaveWhenOthersLeft,
         waitForCallPickup: waitForCallPickup && sendNotificationType === "ring",
-        sentCallNotification$: createSentCallNotification$(
-          scope,
-          props.rtcSession,
-        ),
+        sentCallNotification$,
         windowSize$: scope.behavior(observeElementSize$(rootElement)),
       },
       reactionsReader.raisedHands$,
@@ -200,7 +237,18 @@ export const ActiveCall: FC<ActiveCallProps> = (props) => {
     );
     setVm(vm);
 
-    vm.leave$.pipe(scope.bind()).subscribe(props.onLeft);
+    vm.leave$.pipe(scope.bind()).subscribe((reason) => {
+      telemetry.end(
+        reason === "timeout"
+          ? "unanswered"
+          : reason === "decline"
+            ? "declined"
+            : reason === "allOthersLeft"
+              ? "othersLeft"
+              : "left",
+      );
+      onLeft(reason);
+    });
 
     return (): void => {
       scope.end();
@@ -210,7 +258,7 @@ export const ActiveCall: FC<ActiveCallProps> = (props) => {
     props.matrixRoom,
     props.muteStates,
     props.e2eeSystem,
-    props.onLeft,
+    onLeft,
     urlParams,
     hostBridge,
     mediaDevices,

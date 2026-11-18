@@ -19,6 +19,7 @@ import { BehaviorSubject } from "rxjs";
 import { describe, expect, it, vi } from "vitest";
 
 import { E2eeType } from "../../encryption";
+import { type PublishRequest } from "../../media-api";
 import { FailToStartLivekitConnection, MatrixRTCError } from "../../errors";
 import { Epoch, type ObservableScope } from "../../reactive/ObservableScope";
 import { flushPromises, mockEmitter, testScope } from "../../utils/test";
@@ -76,7 +77,7 @@ function mapOf(...connections: Connection[]): Epoch<ConnectionMap> {
 
 function setup(
   scope: ObservableScope = testScope(),
-  publish = [{ source: "microphone" as const }],
+  publish: PublishRequest[] = [{ source: "microphone" }],
 ): {
   media: ReturnType<typeof createLivekitLocalMedia>;
   connectionMap$: BehaviorSubject<Epoch<ConnectionMap>>;
@@ -101,6 +102,118 @@ function setup(
 }
 
 describe("createLivekitLocalMedia", () => {
+  it.each([
+    new DOMException("permission refused", "NotAllowedError"),
+    new Error("microphone publication rejected"),
+  ])(
+    "exposes a real initial microphone publication rejection without failing the receiving connection: %s",
+    async (error) => {
+      const { media, connectionMap$, localTransport$ } = setup();
+      const { connection, participant } = fakeConnection();
+      vi.mocked(participant.setMicrophoneEnabled).mockRejectedValue(error);
+      connectionMap$.next(mapOf(connection));
+      localTransport$.next(localTransport);
+      media.setPublishing(true);
+      await flushPromises();
+      expect(media.initialMicrophonePublication$.value).toMatchObject({
+        kind: "failed",
+        error: { cause: error },
+      });
+      expect(media.connectionState$.value).toBe(MediaConnectionState.Connected);
+      expect(media.tracks$.value).toEqual([]);
+    },
+  );
+
+  it("waits for microphone publication to resolve even when its track has already appeared", async () => {
+    const { media, connectionMap$, localTransport$ } = setup();
+    const { connection, participant } = fakeConnection();
+    const settled = Promise.withResolvers<void>();
+    const publish = vi
+      .mocked(participant.setMicrophoneEnabled)
+      .getMockImplementation()!;
+    vi.mocked(participant.setMicrophoneEnabled).mockImplementation(
+      async (...args) => {
+        const publication = await publish(...args);
+        await settled.promise;
+        return publication;
+      },
+    );
+    connectionMap$.next(mapOf(connection));
+    localTransport$.next(localTransport);
+    media.setPublishing(true);
+    await flushPromises();
+    expect(media.tracks$.value).toHaveLength(1);
+    expect(media.initialMicrophonePublication$.value.kind).toBe("pending");
+    settled.resolve();
+    await flushPromises();
+    expect(media.initialMicrophonePublication$.value.kind).toBe("published");
+  });
+
+  it("does not accept a resolved enable request that returned no microphone publication", async () => {
+    const { media, connectionMap$, localTransport$ } = setup();
+    const { connection, participant } = fakeConnection();
+    vi.mocked(participant.setMicrophoneEnabled).mockResolvedValue(undefined);
+    connectionMap$.next(mapOf(connection));
+    localTransport$.next(localTransport);
+    media.setPublishing(true);
+    await flushPromises();
+    expect(media.initialMicrophonePublication$.value.kind).toBe("failed");
+    expect(media.tracks$.value).toEqual([]);
+  });
+
+  it("still publishes the required microphone when the optional combined camera request fails", async () => {
+    const { media, connectionMap$, localTransport$ } = setup(testScope(), [
+      { source: "microphone" },
+      { source: "camera" },
+    ]);
+    const { connection, participant } = fakeConnection();
+    vi.mocked(participant.enableCameraAndMicrophone).mockRejectedValue(
+      new DOMException("camera refused", "NotAllowedError"),
+    );
+    connectionMap$.next(mapOf(connection));
+    localTransport$.next(localTransport);
+    media.setPublishing(true);
+    await flushPromises();
+    expect(media.initialMicrophonePublication$.value.kind).toBe("published");
+    expect(media.tracks$.value?.map((track) => track.source)).toEqual([
+      "microphone",
+    ]);
+  });
+
+  it("does not require a microphone that starts muted or is withdrawn before publication", async () => {
+    expect(
+      setup(testScope(), []).media.initialMicrophonePublication$.value.kind,
+    ).toBe("notRequested");
+    const { media, connectionMap$, localTransport$ } = setup();
+    const { connection, participant } = fakeConnection();
+    await media.unpublish("microphone");
+    connectionMap$.next(mapOf(connection));
+    localTransport$.next(localTransport);
+    media.setPublishing(true);
+    await flushPromises();
+    expect(participant.setMicrophoneEnabled).not.toHaveBeenCalled();
+    expect(media.initialMicrophonePublication$.value.kind).toBe("notRequested");
+  });
+
+  it("ignores publication rejection after its scope ends", async () => {
+    const scope = testScope();
+    const { media, connectionMap$, localTransport$ } = setup(scope);
+    const { connection, participant } = fakeConnection();
+    const pending = Promise.withResolvers<never>();
+    vi.mocked(participant.setMicrophoneEnabled).mockReturnValue(
+      pending.promise,
+    );
+    connectionMap$.next(mapOf(connection));
+    localTransport$.next(localTransport);
+    media.setPublishing(true);
+    await flushPromises();
+    scope.end();
+    pending.reject(new Error("late publication failure"));
+    await flushPromises();
+    expect(media.initialMicrophonePublication$.value.kind).toBe("pending");
+    expect(media.publishError$.value).toBeNull();
+  });
+
   it("finds the connection to the local transport once both are known", () => {
     const { media, connectionMap$, localTransport$ } = setup();
     const { connection } = fakeConnection();
@@ -138,6 +251,8 @@ describe("createLivekitLocalMedia", () => {
 
     media.setPublishing(true);
     await flushPromises();
+
+    expect(media.initialMicrophonePublication$.value.kind).toBe("published");
 
     expect(participant.setMicrophoneEnabled).toHaveBeenCalledOnce();
     expect(media.tracks$.value).toHaveLength(1);
@@ -282,6 +397,7 @@ describe("createLivekitLocalMedia", () => {
     await flushPromises();
     // Muted means not created at all, to spare the permission prompt
     expect(second.participant.setMicrophoneEnabled).not.toHaveBeenCalled();
+    expect(media.initialMicrophonePublication$.value.kind).toBe("published");
   });
 
   it("unpublishes a source, the screen share audio with its video", async () => {

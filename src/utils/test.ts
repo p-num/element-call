@@ -65,6 +65,7 @@ import {
   constant,
   type EncryptionError,
   type LocalAudioMediaTrack,
+  type InitialMicrophonePublication,
   type LocalRTCMember,
   type LocalVideoMediaTrack,
   type RTCMember,
@@ -503,6 +504,7 @@ export interface MockParticipationInputs {
   localMember$?: Behavior<LocalRTCMember | null>;
   remoteMembers$?: Behavior<RemoteRTCMember[]>;
   state$?: Behavior<ParticipationState>;
+  initialMicrophonePublication$?: Behavior<InitialMicrophonePublication>;
   keyRotationSuppressed$?: Behavior<boolean>;
   connectedTransports$?: Behavior<TransportMetadata[]>;
 }
@@ -517,6 +519,9 @@ export function mockRTCParticipation(
     localMember$ = constant(null),
     remoteMembers$ = constant([]),
     state$ = constant<ParticipationState>({ kind: "connected" }),
+    initialMicrophonePublication$ = constant<InitialMicrophonePublication>({
+      kind: "notRequested",
+    }),
     keyRotationSuppressed$ = constant(false),
     connectedTransports$ = constant([]),
   }: MockParticipationInputs = {},
@@ -540,6 +545,7 @@ export function mockRTCParticipation(
     slot,
     leave: vi.fn().mockResolvedValue(true),
     state$,
+    initialMicrophonePublication$,
     localMember$,
     remoteMembers$,
     publish: vi.fn(async (request: PublishRequest) =>

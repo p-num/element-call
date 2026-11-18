@@ -35,7 +35,11 @@ import {
   MediaConnectionState,
   type MediaKey,
 } from "./media-backend/api";
-import { type MemberMedia } from "./media-api";
+import {
+  type LocalAudioMediaTrack,
+  type LocalVideoMediaTrack,
+  type MemberMedia,
+} from "./media-api";
 import { constant } from "./reactive/Behavior";
 import { ObservableScope } from "./reactive/ObservableScope";
 import { createRTCParticipation } from "./RTCParticipation";
@@ -103,6 +107,9 @@ interface FakeBackend {
   context: MediaBackendContext;
   prepared: PromiseWithResolvers<{ canDelegateDelayedLeave: boolean }>;
   connectionState$: BehaviorSubject<MediaConnectionState | Error>;
+  tracks$: BehaviorSubject<
+    (LocalAudioMediaTrack | LocalVideoMediaTrack)[] | null
+  >;
   data$: Subject<DataPacket>;
   setPublishing: Mock<(publish: boolean) => void>;
   delegateDelayedLeave: Mock<(delayId: string) => Promise<void>>;
@@ -151,6 +158,9 @@ function setup(
     connectionState$: new BehaviorSubject<MediaConnectionState | Error>(
       MediaConnectionState.Initialized,
     ),
+    tracks$: new BehaviorSubject<
+      (LocalAudioMediaTrack | LocalVideoMediaTrack)[] | null
+    >(null),
     data$: new Subject<DataPacket>(),
     setPublishing: vi.fn(),
     delegateDelayedLeave: vi.fn(async () => Promise.resolve()),
@@ -173,7 +183,7 @@ function setup(
         publishError$: constant(null),
         publish: vi.fn(),
         unpublish: vi.fn(),
-        tracks$: constant(null),
+        tracks$: backendScope.behavior(fake.tracks$),
         encryptionError$: EMPTY,
       },
       mediaFor: fake.mediaFor,
@@ -220,6 +230,36 @@ function setup(
 }
 
 describe("createRTCParticipation", () => {
+  it("keeps custom backends compatible and latches their initial microphone track as publication evidence", () => {
+    const { participation, fake, scope } = setup({
+      publish: [{ source: "microphone" }],
+    });
+    expect(participation.initialMicrophonePublication$.value.kind).toBe(
+      "pending",
+    );
+    fake.tracks$.next([{ source: "camera" } as LocalVideoMediaTrack]);
+    expect(participation.initialMicrophonePublication$.value.kind).toBe(
+      "pending",
+    );
+    fake.tracks$.next([{ source: "microphone" } as LocalAudioMediaTrack]);
+    expect(participation.initialMicrophonePublication$.value.kind).toBe(
+      "published",
+    );
+    fake.tracks$.next(null);
+    expect(participation.initialMicrophonePublication$.value.kind).toBe(
+      "published",
+    );
+    scope.end();
+  });
+
+  it("requires no initial microphone from a muted custom backend", () => {
+    const { participation, scope } = setup();
+    expect(participation.initialMicrophonePublication$.value.kind).toBe(
+      "notRequested",
+    );
+    scope.end();
+  });
+
   it("joins the session once the transport is prepared, and is connected once the media is", async () => {
     const { participation, join, fake, states } = setup();
     expect(states).toEqual([{ kind: "waitingForTransport" }]);

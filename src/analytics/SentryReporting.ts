@@ -8,22 +8,49 @@ Please see LICENSE in the repository root for full details.
 import { type StackFrame } from "@sentry/react";
 
 let errorsEnabled = false;
+let errorsGeneration = 0;
 let performanceEnabled = false;
+let performanceGeneration = 0;
 let initialize: (() => void) | undefined;
+let hasLiveHostChoice = false;
 
 export function configureSentryReporting(
-  errors: boolean,
-  performance: boolean,
+  {
+    errors,
+    performance,
+    embedded,
+  }: { errors: boolean; performance: boolean; embedded: boolean },
   start: () => void,
 ): void {
   initialize = start;
-  setSentryReportingEnabled(errors, performance);
+  // Native can deliver a newer choice while the embedded config is still loading.
+  const useLiveChoice = embedded && hasLiveHostChoice;
+  applySentryReportingChoice(
+    useLiveChoice ? errorsEnabled : errors,
+    useLiveChoice ? performanceEnabled : performance,
+  );
+}
+
+export function resetSentryReporting(): void {
+  initialize = undefined;
+  hasLiveHostChoice = false;
+  applySentryReportingChoice(false, false);
 }
 
 export function setSentryReportingEnabled(
   errors: boolean,
   performance: boolean,
 ): void {
+  hasLiveHostChoice = true;
+  applySentryReportingChoice(errors, performance);
+}
+
+function applySentryReportingChoice(
+  errors: boolean,
+  performance: boolean,
+): void {
+  if (errorsEnabled && !errors) errorsGeneration++;
+  if (performanceEnabled && !performance) performanceGeneration++;
   errorsEnabled = errors;
   performanceEnabled = performance;
   if ((errors || performance) && initialize) {
@@ -37,8 +64,22 @@ export function sentryErrorsEnabled(): boolean {
   return errorsEnabled;
 }
 
+export function sentryErrorsGeneration(): number {
+  return errorsGeneration;
+}
+
 export function sentryPerformanceEnabled(): boolean {
   return performanceEnabled;
+}
+
+export function sentryPerformanceGeneration(): number {
+  return performanceGeneration;
+}
+
+export function embeddedSentryEnvironment(environment?: string | null): string {
+  return environment && /^[A-Za-z][A-Za-z0-9_-]{0,31}$/.test(environment)
+    ? environment
+    : "production";
 }
 
 export function rewriteEmbeddedCallFrame(frame: StackFrame): StackFrame {

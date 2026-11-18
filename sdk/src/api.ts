@@ -20,6 +20,7 @@ import { type Observable } from "rxjs";
 import { type Behavior } from "./reactive/Behavior";
 import {
   type LocalAudioMediaTrack,
+  type InitialMicrophonePublication,
   type LocalMemberMedia,
   type LocalVideoMediaTrack,
   type MediaSource,
@@ -162,6 +163,8 @@ export interface RTCParticipation {
   /** Ends local media immediately and shares the bounded membership-departure result. */
   leave(): Promise<boolean>;
   state$: Behavior<ParticipationState>;
+  /** Read-only join publication evidence; failure does not stop receiving media. */
+  readonly initialMicrophonePublication$: Behavior<InitialMicrophonePublication>;
 
   /** Null until our own membership has been seen in the room. */
   localMember$: Behavior<LocalRTCMember | null>;

@@ -39,6 +39,13 @@ describe("parseResolution", () => {
 });
 
 describe("Setting", () => {
+  it("can apply a runtime host choice without replacing local storage", () => {
+    const setting = new Setting<boolean>("runtime-choice", true);
+    setting.setValue(true);
+    setting.setRuntimeValue(false, "host");
+    expect(setting.getValue()).toBe(false);
+    expect(localStorage.getItem("matrix-setting-runtime-choice")).toBe("true");
+  });
   describe("seedFromConfig", () => {
     it("updates value when no localStorage value exists", () => {
       const setting = new Setting<string>("test-seed", "default");

@@ -89,16 +89,14 @@ export async function getSFUConfig({
       : {};
   const endpoint = role === "publisher" ? "legacy" : "default";
   try {
-    logger.info(
-      `Trying to get JWT with ${endpoint} endpoint for focus ${serviceUrl}...`,
-    );
+    logger.info(`Trying to get JWT with ${endpoint} endpoint`);
     const sfuConfig = await (
       endpoint === "legacy" ? getLiveKitJWTLegacy : getLiveKitJWT
     )(membership, serviceUrl, roomId, slotId, openIdToken, delay);
     logger.info(`Got JWT from call's active focus URL.`);
     return extractFullConfigFromToken(sfuConfig);
   } catch (e) {
-    logger.error(`Failed fetching jwt with ${endpoint} endpoint:`, e);
+    logger.error(`Failed fetching JWT with ${endpoint} endpoint`);
     throw new FailToGetOpenIdToken(
       e instanceof Error ? e : new Error(`Unknown error ${e}`),
     );

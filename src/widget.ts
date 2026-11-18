@@ -28,6 +28,7 @@ import { ElementCallReactionEventType } from "./reactions";
 export enum ElementWidgetActions {
   JoinCall = "io.element.join",
   ConnectionState = "io.letro.connection_state",
+  CallTelemetry = "io.letro.call_telemetry",
   HangupCall = "im.vector.hangup",
   Close = "io.element.close",
   // This can be sent as from or to widget

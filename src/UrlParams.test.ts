@@ -30,6 +30,52 @@ const HOMESERVER = "localhost";
 mockConfig();
 
 describe("UrlParams", () => {
+  it("defaults embedded reporting choices off and parses only explicit true independently", () => {
+    expect(computeUrlParams("", "")).toMatchObject({
+      usageAnalyticsEnabled: false,
+      hostCallTelemetryEnabled: false,
+      sentryCrashReportingEnabled: false,
+      sentryPerformanceReportingEnabled: false,
+    });
+    expect(componentProperties).toMatchObject({
+      usageAnalyticsEnabled: false,
+      hostCallTelemetryEnabled: false,
+      sentryCrashReportingEnabled: false,
+      sentryPerformanceReportingEnabled: false,
+    });
+    expect(
+      computeUrlParams(
+        "",
+        "#?usageAnalyticsEnabled=true&sentryCrashReportingEnabled=false&sentryPerformanceReportingEnabled=true",
+      ),
+    ).toMatchObject({
+      usageAnalyticsEnabled: true,
+      sentryCrashReportingEnabled: false,
+      sentryPerformanceReportingEnabled: true,
+    });
+    expect(
+      computeUrlParams(
+        "",
+        "#?usageAnalyticsEnabled=invalid&sentryCrashReportingEnabled=invalid&sentryPerformanceReportingEnabled=invalid",
+      ),
+    ).toMatchObject({
+      usageAnalyticsEnabled: false,
+      sentryCrashReportingEnabled: false,
+      sentryPerformanceReportingEnabled: false,
+    });
+  });
+  it.each([
+    ["", false],
+    ["false", false],
+    ["invalid", false],
+    ["TRUE", false],
+    ["true", true],
+  ])("requires explicit host telemetry capability %s", (value, expected) => {
+    expect(
+      computeUrlParams("", `#?hostCallTelemetryEnabled=${value}`)
+        .hostCallTelemetryEnabled,
+    ).toBe(expected);
+  });
   it.each(["light", "dark", "light-high-contrast", "dark-high-contrast"])(
     "selects brand independently of %s",
     (theme) => {

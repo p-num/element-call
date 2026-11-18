@@ -8,8 +8,10 @@ Please see LICENSE in the repository root for full details.
 import { Subject } from "rxjs";
 import { logger } from "matrix-js-sdk/lib/logger";
 import { setSentryReportingEnabled } from "./analytics/SentryReporting.ts";
+import { PosthogAnalytics } from "./analytics/PosthogAnalytics";
 
 export interface Controls {
+  setUsageAnalyticsEnabled(enabled: boolean): void;
   setSentryReportingEnabled(errors: boolean, performance: boolean): void;
   canEnterPip(): boolean;
   enablePip(): void;
@@ -104,8 +106,60 @@ export const setPlaybackStarted = (): void => {
   }
 };
 
+type HostReportingChoices = {
+  usage?: boolean;
+  sentry?: Parameters<Controls["setSentryReportingEnabled"]>;
+};
+
+let hostReporting: HostReportingChoices | "denied" | undefined;
+
+export function deferHostReportingUntilReady(): (
+  acknowledgement: Promise<void>,
+) => Promise<void> {
+  const choices: HostReportingChoices = {};
+  hostReporting = choices;
+  return async (acknowledgement) => {
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    let acknowledged = false;
+    let acceptedUsageGrant = false;
+    try {
+      // Native applies the current choices before replying to content_loaded.
+      acknowledged = await Promise.race([
+        acknowledgement.then(() => true),
+        new Promise<false>((resolve) => {
+          timeout = setTimeout(() => resolve(false), 2_000);
+        }),
+      ]);
+      if (!acknowledged) return;
+      acceptedUsageGrant = choices.usage === true;
+      if (choices.usage !== undefined)
+        PosthogAnalytics.setUsageAnalyticsEnabled(choices.usage);
+      if (choices.sentry) setSentryReportingEnabled(...choices.sentry);
+    } finally {
+      clearTimeout(timeout);
+      if (!acceptedUsageGrant) PosthogAnalytics.retireScopedWidgetIdentity();
+      // A WebView can finish the pending control evaluations after the widget timed out.
+      hostReporting = acknowledged ? undefined : "denied";
+    }
+  };
+}
+
 window.controls = {
-  setSentryReportingEnabled,
+  setUsageAnalyticsEnabled: (enabled) => {
+    if (hostReporting === "denied") return;
+    if (hostReporting) {
+      hostReporting.usage = enabled;
+      // The host supplied a staged ID only after consent. An explicit false revokes it.
+      if (enabled === false) PosthogAnalytics.retireScopedWidgetIdentity();
+    } else {
+      PosthogAnalytics.setUsageAnalyticsEnabled(enabled);
+    }
+  },
+  setSentryReportingEnabled: (errors, performance) => {
+    if (hostReporting === "denied") return;
+    if (hostReporting) hostReporting.sentry = [errors, performance];
+    else setSentryReportingEnabled(errors, performance);
+  },
   canEnterPip(): boolean {
     return setPipEnabled$.observed;
   },

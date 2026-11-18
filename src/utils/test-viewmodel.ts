@@ -71,6 +71,7 @@ export function getBasicRTCSession(
       getSyncState: () => SyncState.Syncing,
       getDomain: () => "example.com",
       getAccessToken: () => "fake-token",
+      getAccountData: vitest.fn().mockReturnValue(undefined),
       sendEvent: vitest.fn().mockResolvedValue({ event_id: "$fake:event" }),
       redactEvent: vitest.fn().mockResolvedValue({ event_id: "$fake:event" }),
       decryptEventIfNeeded: vitest.fn().mockResolvedValue(undefined),

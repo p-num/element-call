@@ -73,6 +73,35 @@ describe("getSFUConfig", () => {
     });
   });
 
+  it("never logs OpenID tokens, request URLs, room IDs or returned server text", async () => {
+    const log = vitest.spyOn(logger, "info").mockImplementation(() => {});
+    const debug = vitest.spyOn(logger, "debug").mockImplementation(() => {});
+    const error = vitest.spyOn(logger, "error").mockImplementation(() => {});
+    matrixClient.getOpenIdToken.mockResolvedValue({
+      access_token: "private-openid-token",
+      token_type: "Bearer",
+      matrix_server_name: "private-server",
+      expires_in: 60,
+    });
+    fetchMock.post("https://sfu.example.org/sfu/get", {
+      status: 400,
+      body: {
+        errcode: "M_FORBIDDEN",
+        error: "private-server-body private-openid-token",
+      },
+    });
+    await expect(getSFUConfig(params)).rejects.toThrow(FailToGetOpenIdToken);
+    const serialized = JSON.stringify([
+      ...log.mock.calls,
+      ...debug.mock.calls,
+      ...error.mock.calls,
+    ]);
+    expect(serialized).not.toMatch(/private-|https:|example_room_id/);
+    log.mockRestore();
+    debug.mockRestore();
+    error.mockRestore();
+  });
+
   it("should fail if the SFU errors", async () => {
     fetchMock.post("https://sfu.example.org/sfu/get", () => {
       return {

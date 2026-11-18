@@ -191,8 +191,8 @@ importers:
         specifier: ^1.9.1
         version: 1.9.2
       matrix-js-sdk:
-        specifier: git+https://git.postnumber.com/letro/matrix-js-sdk.git#9f6d88ea153a8a9b98906b0fdec4cf25fc70515f
-        version: git+https://git.postnumber.com/letro/matrix-js-sdk.git#9f6d88ea153a8a9b98906b0fdec4cf25fc70515f
+        specifier: git+https://git.postnumber.com/letro/matrix-js-sdk.git#197ec5aa0d4caf61a6be286adea2f727d0dd3024
+        version: git+https://git.postnumber.com/letro/matrix-js-sdk.git#197ec5aa0d4caf61a6be286adea2f727d0dd3024
       matrix-widget-api:
         specifier: ^1.18.0
         version: 1.20.0
@@ -4759,9 +4759,9 @@ packages:
   matrix-events-sdk@0.0.1:
     resolution: {integrity: sha512-1QEOsXO+bhyCroIe2/A5OwaxHvBm7EsSQ46DEDn8RBIfQwN5HWBpFvyWWR4QY0KHPPnnJdI99wgRiAl7Ad5qaA==}
 
-  matrix-js-sdk@git+https://git.postnumber.com/letro/matrix-js-sdk.git#9f6d88ea153a8a9b98906b0fdec4cf25fc70515f:
-    resolution: {commit: 9f6d88ea153a8a9b98906b0fdec4cf25fc70515f, repo: https://git.postnumber.com/letro/matrix-js-sdk.git, type: git}
-    version: 44.0.0-letro.1
+  matrix-js-sdk@git+https://git.postnumber.com/letro/matrix-js-sdk.git#197ec5aa0d4caf61a6be286adea2f727d0dd3024:
+    resolution: {commit: 197ec5aa0d4caf61a6be286adea2f727d0dd3024, repo: https://git.postnumber.com/letro/matrix-js-sdk.git, type: git}
+    version: 44.0.0-letro.2
     engines: {node: '>=22.0.0'}
 
   matrix-widget-api@1.20.0:
@@ -10468,7 +10468,7 @@ snapshots:
 
   matrix-events-sdk@0.0.1: {}
 
-  matrix-js-sdk@git+https://git.postnumber.com/letro/matrix-js-sdk.git#9f6d88ea153a8a9b98906b0fdec4cf25fc70515f:
+  matrix-js-sdk@git+https://git.postnumber.com/letro/matrix-js-sdk.git#197ec5aa0d4caf61a6be286adea2f727d0dd3024:
     dependencies:
       '@babel/runtime': 8.0.0
       '@matrix-org/matrix-sdk-crypto-wasm': 18.9.0

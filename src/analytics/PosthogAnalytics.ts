@@ -8,7 +8,7 @@ Please see LICENSE in the repository root for full details.
 import posthog, {
   type CaptureOptions,
   type CaptureResult,
-  type PostHog,
+  PostHog,
   type Properties,
 } from "posthog-js";
 import { logger } from "matrix-js-sdk/lib/logger";
@@ -24,11 +24,11 @@ import {
   MuteMicrophoneTracker,
   UndecryptableToDeviceEventTracker,
   QualitySurveyEventTracker,
-  CallDisconnectedEventTracker,
-  CallConnectDurationTracker,
   CallReconnectingTracker,
 } from "./PosthogEvents";
 import { optInAnalytics } from "../settings/settings";
+import { type TelemetryEvent } from "./CallTelemetry";
+import { projectCallEvent } from "./CallEventProjection";
 
 /* Posthog analytics tracking.
  *
@@ -117,6 +117,9 @@ export function santizeSensitiveData(
   anonymity: Anonymity,
 ): CaptureResult | null {
   if (event === null) return null;
+  const callEvent = projectCallEvent(event);
+  if (callEvent) return callEvent;
+  delete event.properties.callId;
 
   stripSensitiveFields(event.properties, anonymity);
   // posthog can stash person-profile updates either at the top level
@@ -153,10 +156,15 @@ export interface AnalyticsConfig {
   matrixBackend: "embedded" | "jssdk";
   /** The analytics ID the host has assigned to this user, when embedded. */
   hostAnalyticsId?: string | null;
+  /** The native widget assigned a fresh ID for this instance only. */
+  widgetScopedAnalyticsId?: boolean;
+  hostUsageAnalyticsEnabled?: boolean;
 }
 
 /** Analytics are off until someone asks for them. */
 const analyticsDisabled: AnalyticsConfig = { matrixBackend: "jssdk" };
+const widgetAnalyticsIdPattern =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 export class PosthogAnalytics {
   /* Wrapper for Posthog analytics.
@@ -177,8 +185,17 @@ export class PosthogAnalytics {
 
   // set true during the constructor if posthog config is present, otherwise false
   private static internalInstance: PosthogAnalytics | null = null;
+  private static callGeneration = 0;
+  private static hostUsageOverride: boolean | undefined;
+  private static hostUsageDenial: "none" | "before-grant" | "after-grant" =
+    "none";
 
   private identificationPromise?: Promise<void>;
+  private hostAnalyticsId?: string | null;
+  private identifiedGeneration: number | undefined;
+  private identificationPending = false;
+  private identificationRevision = 0;
+  private pendingCallEvents: TelemetryEvent[] = [];
   private readonly enabled: boolean = false;
   private anonymity = Anonymity.Disabled;
   private platformSuperProperties = {};
@@ -207,29 +224,68 @@ export class PosthogAnalytics {
 
   public static get instance(): PosthogAnalytics {
     if (!this.internalInstance) {
-      this.internalInstance = new PosthogAnalytics(
-        posthog,
-        PosthogAnalytics.analyticsConfig,
-      );
+      this.internalInstance = new PosthogAnalytics(this.analyticsConfig);
     }
     return this.internalInstance;
   }
 
   public static resetInstance(): void {
-    // Reset the singleton instance
+    this.callGeneration++;
+    this.internalInstance?.clearCallIdentity();
+    this.internalInstance?.optInListener?.unsubscribe();
+    if (this.internalInstance?.config.widgetScopedAnalyticsId)
+      this.internalInstance.logout();
+    this.hostUsageOverride = undefined;
+    this.hostUsageDenial = "none";
     this.internalInstance = null;
     this.analyticsConfig = analyticsDisabled;
   }
 
-  private constructor(
-    private readonly posthog: PostHog,
-    private readonly config: AnalyticsConfig,
-  ) {
+  private readonly posthog: PostHog;
+
+  private constructor(private readonly config: AnalyticsConfig) {
+    const widgetPosthog = config.widgetScopedAnalyticsId
+      ? new ScopedWidgetPostHog(() => PosthogAnalytics.callGeneration)
+      : undefined;
+    this.posthog = widgetPosthog ?? posthog;
+    const hostUsageEnabled =
+      PosthogAnalytics.hostUsageOverride ??
+      config.hostUsageAnalyticsEnabled === true;
+    this.hostAnalyticsId = config.hostAnalyticsId;
+    if (
+      config.widgetScopedAnalyticsId &&
+      (PosthogAnalytics.isWidgetIdentityRevoked(config) ||
+        !widgetAnalyticsIdPattern.test(this.hostAnalyticsId ?? ""))
+    )
+      this.hostAnalyticsId = null;
+    if (
+      config.hostUsageAnalyticsEnabled !== undefined ||
+      PosthogAnalytics.hostUsageOverride !== undefined
+    )
+      optInAnalytics.setRuntimeValue(hostUsageEnabled, "host-initial");
     const { apiKey, apiHost } = config;
 
     if (apiKey && apiHost) {
-      const beforeSend = (event: CaptureResult | null): CaptureResult | null =>
-        santizeSensitiveData(event, this.anonymity);
+      const beforeSend = (
+        event: CaptureResult | null,
+      ): CaptureResult | null => {
+        if (widgetPosthog) {
+          if (
+            !event ||
+            !this.hostAnalyticsId ||
+            this.anonymity !== Anonymity.Pseudonymous ||
+            this.identifiedGeneration !== PosthogAnalytics.callGeneration ||
+            event.properties.distinct_id !== this.hostAnalyticsId ||
+            event.properties.token !== apiKey ||
+            event.properties.$process_person_profile !== false
+          )
+            return null;
+          const sanitized = projectCallEvent(event, true);
+          if (sanitized) widgetPosthog.authorize(sanitized);
+          return sanitized;
+        }
+        return santizeSensitiveData(event, this.anonymity);
+      };
       this.posthog.init(apiKey, {
         api_host: apiHost,
         autocapture: false,
@@ -237,6 +293,16 @@ export class PosthogAnalytics {
         mask_all_element_attributes: true,
         mask_personal_data_properties: true,
         capture_pageview: false,
+        ...(config.widgetScopedAnalyticsId
+          ? {
+              persistence: "memory",
+              person_profiles: "never",
+              request_batching: false,
+              // Native compression can defer dispatch past the consent check.
+              disable_compression: true,
+              disable_session_recording: true,
+            }
+          : {}),
         before_send: beforeSend,
         respect_dnt: true,
         advanced_disable_decide: true,
@@ -284,6 +350,15 @@ export class PosthogAnalytics {
   }
 
   private setAnonymity(anonymity: Anonymity): void {
+    if (this.anonymity === anonymity) return;
+    if (
+      anonymity !== Anonymity.Pseudonymous &&
+      this.anonymity === Anonymity.Pseudonymous
+    ) {
+      PosthogAnalytics.callGeneration++;
+      this.clearCallIdentity();
+      if (this.config.widgetScopedAnalyticsId) this.hostAnalyticsId = null;
+    }
     // Update this.anonymity.
     // To update the anonymity typically you want to call updateAnonymityFromSettings
     // to ensure this value is in step with the user's settings.
@@ -309,35 +384,74 @@ export class PosthogAnalytics {
   private async identifyUser(
     analyticsIdGenerator: () => string,
   ): Promise<void> {
+    const generation = PosthogAnalytics.callGeneration;
+    const revision = ++this.identificationRevision;
     if (this.anonymity == Anonymity.Pseudonymous && this.enabled) {
-      // Check the user's account_data for an analytics ID to use. Storing the ID in account_data allows
-      // different devices to send the same ID.
-      let analyticsID = await this.getAnalyticsId();
+      this.identifiedGeneration = undefined;
+      this.identificationPending = true;
       try {
-        if (!analyticsID && this.config.matrixBackend !== "embedded") {
-          // only mint an analytics ID when we are the ones storing it.
+        // Check the user's account_data for an analytics ID to use. Storing the ID in account_data allows
+        // different devices to send the same ID.
+        let analyticsID =
+          this.config.matrixBackend === "embedded"
+            ? this.hostAnalyticsId
+            : await this.getAnalyticsId();
+        if (
+          generation !== PosthogAnalytics.callGeneration ||
+          revision !== this.identificationRevision ||
+          this.anonymity !== Anonymity.Pseudonymous
+        )
+          return;
+        try {
+          if (!analyticsID && this.config.matrixBackend !== "embedded") {
+            // only mint an analytics ID when we are the ones storing it.
 
-          // Couldn't retrieve an analytics ID from user settings, so create one and set it on the server.
-          // Note there's a race condition here - if two devices do these steps at the same time, last write
-          // wins, and the first writer will send tracking with an ID that doesn't match the one on the server
-          // until the next time account data is refreshed and this function is called (most likely on next
-          // page load). This will happen pretty infrequently, so we can tolerate the possibility.
-          analyticsID = analyticsIdGenerator();
-          await this.setAccountAnalyticsId(analyticsID);
+            // Couldn't retrieve an analytics ID from user settings, so create one and set it on the server.
+            // Note there's a race condition here - if two devices do these steps at the same time, last write
+            // wins, and the first writer will send tracking with an ID that doesn't match the one on the server
+            // until the next time account data is refreshed and this function is called (most likely on next
+            // page load). This will happen pretty infrequently, so we can tolerate the possibility.
+            analyticsID = analyticsIdGenerator();
+            await this.setAccountAnalyticsId(analyticsID);
+          }
+        } catch (e) {
+          // The above could fail due to network requests, but not essential to starting the application,
+          // so swallow it.
+          logger.log(
+            "Unable to identify user for tracking" + (e as Error)?.toString(),
+          );
         }
-      } catch (e) {
-        // The above could fail due to network requests, but not essential to starting the application,
-        // so swallow it.
-        logger.log(
-          "Unable to identify user for tracking" + (e as Error)?.toString(),
-        );
-      }
-      if (analyticsID) {
-        this.posthog.identify(analyticsID);
-      } else {
-        logger.info(
-          "No analyticsID is available. Should not try to setup posthog",
-        );
+        if (
+          generation !== PosthogAnalytics.callGeneration ||
+          revision !== this.identificationRevision ||
+          this.anonymity !== Anonymity.Pseudonymous
+        )
+          return;
+        if (analyticsID) {
+          if (this.config.widgetScopedAnalyticsId) {
+            // Set the capture identity without creating or merging a person profile.
+            this.posthog.register({ distinct_id: analyticsID });
+          } else {
+            this.posthog.identify(analyticsID);
+          }
+          this.identifiedGeneration = generation;
+          this.identificationPending = false;
+          const pending = this.pendingCallEvents;
+          this.pendingCallEvents = [];
+          for (const event of pending) this.trackCallEvent(event);
+        } else {
+          this.identificationPending = false;
+          this.pendingCallEvents = [];
+          logger.info(
+            "No analyticsID is available. Should not try to setup posthog",
+          );
+        }
+      } finally {
+        if (revision === this.identificationRevision) {
+          this.identificationPending = false;
+          if (this.identifiedGeneration !== generation)
+            this.pendingCallEvents = [];
+        }
       }
     }
   }
@@ -345,7 +459,7 @@ export class PosthogAnalytics {
   private async getAnalyticsId(): Promise<string | null> {
     const client: MatrixClient = window.matrixclient;
     if (this.config.matrixBackend === "embedded") {
-      return this.config.hostAnalyticsId ?? null;
+      return this.hostAnalyticsId ?? null;
     } else {
       const accountData = await client.getAccountDataFromServer(
         PosthogAnalytics.ANALYTICS_EVENT_TYPE,
@@ -374,9 +488,12 @@ export class PosthogAnalytics {
   }
 
   public logout(): void {
+    PosthogAnalytics.callGeneration++;
+    this.clearCallIdentity();
     if (this.enabled) {
       this.posthog.reset();
     }
+    if (this.config.widgetScopedAnalyticsId) this.hostAnalyticsId = null;
     this.optInListener?.unsubscribe();
     this.optInListener = null;
     this.setAnonymity(Anonymity.Disabled);
@@ -409,13 +526,15 @@ export class PosthogAnalytics {
   }
 
   private async maybeIdentifyUser(): Promise<void> {
+    const generation = PosthogAnalytics.callGeneration;
     // We may not yet have a Matrix client at this point, if not, bail. This should get
     // triggered again by onLoginStatusChanged once we do have a client.
-    if (!window.matrixclient) return;
+    if (!window.matrixclient && this.config.matrixBackend !== "embedded")
+      return;
 
     if (this.anonymity === Anonymity.Pseudonymous) {
       this.setRegistrationType(
-        window.matrixclient.isGuest() || window.passwordlessUser
+        window.matrixclient?.isGuest() || window.passwordlessUser
           ? RegistrationType.Guest
           : RegistrationType.Registered,
       );
@@ -424,6 +543,7 @@ export class PosthogAnalytics {
         PosthogAnalytics.getRandomAnalyticsId,
       );
       await this.identificationPromise;
+      if (generation !== PosthogAnalytics.callGeneration) return;
       if (this.userRegisteredInThisSession()) {
         this.eventSignup.track();
       }
@@ -438,10 +558,14 @@ export class PosthogAnalytics {
     { eventName, ...properties }: E,
     options?: CaptureOptions,
   ): void {
+    const generation = PosthogAnalytics.callGeneration;
     const doCapture = (): void => {
       if (
+        generation !== PosthogAnalytics.callGeneration ||
         this.anonymity == Anonymity.Disabled ||
-        this.anonymity == Anonymity.Anonymous
+        this.anonymity == Anonymity.Anonymous ||
+        (this.config.widgetScopedAnalyticsId &&
+          this.identifiedGeneration !== generation)
       )
         return;
       this.capture(eventName, properties, options);
@@ -455,6 +579,69 @@ export class PosthogAnalytics {
     } else {
       doCapture();
     }
+  }
+
+  /** Accepted identities capture synchronously; first-use boundaries wait for identification. */
+  public trackCallEvent(event: TelemetryEvent): void {
+    if (!this.enabled || this.anonymity !== Anonymity.Pseudonymous) return;
+    if (this.identifiedGeneration !== PosthogAnalytics.callGeneration) {
+      if (this.identificationPending) this.pendingCallEvents.push({ ...event });
+      return;
+    }
+    const { eventName, ...properties } = event;
+    this.capture(eventName, properties, { send_instantly: true });
+  }
+
+  private clearCallIdentity(): void {
+    this.identifiedGeneration = undefined;
+    this.identificationPending = false;
+    this.identificationRevision++;
+    this.pendingCallEvents = [];
+  }
+
+  /** Normal choice initialization precedes accepting the attempt, including crash-only calls. */
+  public callLifetime(): () => boolean {
+    this.startListeningToSettingsChanges();
+    const generation = PosthogAnalytics.callGeneration;
+    return () => generation === PosthogAnalytics.callGeneration;
+  }
+
+  public static setUsageAnalyticsEnabled(enabled: boolean): void {
+    enabled = enabled === true;
+    if (!enabled) {
+      if (
+        this.hostUsageOverride === true ||
+        this.internalInstance?.config.hostUsageAnalyticsEnabled === true
+      ) {
+        this.retireScopedWidgetIdentity();
+      } else if (this.hostUsageDenial === "none") {
+        this.hostUsageDenial = "before-grant";
+      }
+    }
+    this.hostUsageOverride = enabled;
+    const previous = optInAnalytics.getValue();
+    if (previous === enabled) return;
+    if (previous === true && !enabled) {
+      this.callGeneration++;
+      this.internalInstance?.clearCallIdentity();
+    }
+    optInAnalytics.setRuntimeValue(enabled, "host-live");
+  }
+
+  public static retireScopedWidgetIdentity(): void {
+    this.hostUsageDenial = "after-grant";
+    const instance = this.internalInstance;
+    if (instance?.config.widgetScopedAnalyticsId)
+      instance.hostAnalyticsId = null;
+  }
+
+  private static isWidgetIdentityRevoked(config: AnalyticsConfig): boolean {
+    // A host can stage an ID with usage disabled, then grant once the widget is ready.
+    return (
+      this.hostUsageDenial === "after-grant" ||
+      (this.hostUsageDenial === "before-grant" &&
+        config.hostUsageAnalyticsEnabled === true)
+    );
   }
 
   public startListeningToSettingsChanges(): void {
@@ -494,7 +681,44 @@ export class PosthogAnalytics {
   public eventMuteCamera = new MuteCameraTracker();
   public eventUndecryptableToDevice = new UndecryptableToDeviceEventTracker();
   public eventQualitySurvey = new QualitySurveyEventTracker();
-  public eventCallDisconnected = new CallDisconnectedEventTracker();
-  public eventCallConnectDuration = new CallConnectDurationTracker();
   public eventCallReconnecting = new CallReconnectingTracker();
+}
+
+class ScopedWidgetPostHog extends PostHog {
+  private readonly authorized = new WeakMap<object, number>();
+
+  public constructor(private readonly currentGeneration: () => number) {
+    super();
+  }
+
+  public authorize(event: CaptureResult): void {
+    this.authorized.set(event, this.currentGeneration());
+  }
+
+  // PostHog 1.408.2 retries this same payload through _send_request without rerunning before_send.
+  public override _send_request(
+    request: Parameters<PostHog["_send_request"]>[0],
+  ): void {
+    const { data } = request;
+    if (
+      typeof data !== "object" ||
+      data === null ||
+      this.authorized.get(data) !== this.currentGeneration() ||
+      typeof globalThis.fetch !== "function"
+    )
+      return;
+
+    // The pinned SDK forwards the entire fetchOptions object to browser Fetch.
+    const fetchOptions = {
+      ...request.fetchOptions,
+      referrerPolicy: "no-referrer",
+    } satisfies RequestInit;
+    super._send_request({
+      ...request,
+      fetchOptions,
+      transport: "fetch",
+      // PostHog otherwise falls back to a transport without referrerPolicy.
+      disableTransport: ["XHR", "sendBeacon"],
+    });
+  }
 }

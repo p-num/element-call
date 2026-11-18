@@ -18,6 +18,10 @@ import {
   type JoinCallData,
   type WidgetHelpers,
 } from "./widget";
+import {
+  type LifecycleReport,
+  type LifecycleAcknowledgement,
+} from "./analytics/CallTelemetry";
 
 // Note: these are type aliases rather than interfaces so that they satisfy the
 // widget API's index-signature payload types.
@@ -76,6 +80,14 @@ export interface HostBridge {
   notifyJoined(): Promise<void>;
   /** Current local MatrixRTC and media connection; never inferred from join intent. */
   notifyConnectionState?(state: { connected: boolean }): Promise<void>;
+  /**
+   * Closed lifecycle reports. The URL's hostCallTelemetryEnabled must also be
+   * true before this capability is used; a widget transport alone cannot vouch
+   * that its host implements the custom action.
+   */
+  notifyCallTelemetry?(
+    report: LifecycleReport,
+  ): Promise<LifecycleAcknowledgement | undefined>;
   /** Tells the host that the user has hung up. */
   notifyHungUp(): Promise<void>;
   /** Tells the host the user's current audio and video mute state. */
@@ -182,6 +194,7 @@ export function createWidgetHostBridge(widget: WidgetHelpers): HostBridge {
 
   // One sequence for this widget, including replacement participations.
   let connectionSequence = 0;
+  let telemetrySequence = 0;
   return {
     setAlwaysOnScreen: async (alwaysOnScreen) => {
       await widget.api.setAlwaysOnScreen(alwaysOnScreen);
@@ -193,6 +206,28 @@ export function createWidgetHostBridge(widget: WidgetHelpers): HostBridge {
         ...state,
         sequence: connectionSequence++,
       }),
+    notifyCallTelemetry: async (report) => {
+      const data = validatedLifecycleReport(report);
+      if (data === undefined || telemetrySequence >= Number.MAX_SAFE_INTEGER)
+        return;
+      const response = await widget.api.transport.send(
+        ElementWidgetActions.CallTelemetry,
+        {
+          ...data,
+          schemaVersion: 1,
+          sequence: ++telemetrySequence,
+        },
+      );
+      const hostAttemptId = response?.hostAttemptId;
+      if (
+        typeof hostAttemptId !== "string" ||
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+          hostAttemptId,
+        )
+      )
+        return undefined;
+      return { hostAttemptId };
+    },
     notifyHungUp: async () => send(ElementWidgetActions.HangupCall),
     notifyDeviceMute: async (state) =>
       send(ElementWidgetActions.DeviceMute, state),
@@ -243,6 +278,53 @@ export function createWidgetHostBridge(widget: WidgetHelpers): HostBridge {
         `Downloaded file format is not supported: ${typeof file}`,
       );
     },
+  };
+}
+
+function validatedLifecycleReport(
+  report: LifecycleReport,
+): Record<string, string> | undefined {
+  const phases = [
+    "initiation",
+    "ringing",
+    "connected",
+    "disconnected",
+    "reconnected",
+    "failed",
+    "timedOut",
+    "terminated",
+  ];
+  const reasons = [
+    "left",
+    "othersLeft",
+    "declined",
+    "unanswered",
+    "ringNotSent",
+    "empty",
+    "slotClosed",
+    "connectionLost",
+    "failed",
+    "permissionRefused",
+    "abandoned",
+    "replaced",
+    "widgetSetupFailed",
+    "joinTimedOut",
+    "widgetLoadTimedOut",
+    "webContentProcessTerminated",
+    "componentEnded",
+  ];
+  if (
+    !phases.includes(report.phase) ||
+    (report.reason !== undefined && !reasons.includes(report.reason)) ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      report.componentAttemptId,
+    )
+  )
+    return undefined;
+  return {
+    phase: report.phase,
+    componentAttemptId: report.componentAttemptId,
+    ...(report.reason === undefined ? {} : { reason: report.reason }),
   };
 }
 

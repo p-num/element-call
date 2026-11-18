@@ -17,6 +17,7 @@ import {
 } from "vitest";
 
 import { mockConfig } from "./utils/test";
+import "./controls";
 import { setSentryReportingEnabled } from "./analytics/SentryReporting";
 
 const sentryInitSpy = vi.hoisted(() => vi.fn());
@@ -25,6 +26,10 @@ const sentryInitSpy = vi.hoisted(() => vi.fn());
 vi.mock("@sentry/react", () => ({
   init: sentryInitSpy,
   reactRouterV7BrowserTracingIntegration: vi.fn(),
+  makeFetchTransport: vi.fn(() => ({
+    send: vi.fn().mockResolvedValue({ statusCode: 200 }),
+    flush: vi.fn().mockResolvedValue(true),
+  })),
   rewriteFramesIntegration: vi.fn(),
 }));
 
@@ -92,19 +97,19 @@ describe("Initializer", async () => {
         });
 
         it("uses sentryDsn param if set", async () => {
-          window.location.hash = `#?sentryDsn=${encodeURIComponent("https://dsn.example.com.localhost")}`;
+          window.location.hash = `#?sentryDsn=${encodeURIComponent("https://dsn.example.com.localhost")}&sentryCrashReportingEnabled=true`;
           await Initializer.init();
           expect(sentryInitSpy).toHaveBeenCalledWith(
             expect.objectContaining({
               dsn: "https://dsn.example.com.localhost",
-              environment: undefined,
+              environment: "production",
               release: "call-test-release",
             }),
           );
         });
 
         it("uses sentryDsn and sentryEnvironment params if set", async () => {
-          window.location.hash = `#?sentryDsn=${encodeURIComponent("https://dsn.example.com.localhost")}&sentryEnvironment=fooEnvironment`;
+          window.location.hash = `#?sentryDsn=${encodeURIComponent("https://dsn.example.com.localhost")}&sentryEnvironment=fooEnvironment&sentryCrashReportingEnabled=true`;
           await Initializer.init();
           expect(sentryInitSpy).toHaveBeenCalledWith(
             expect.objectContaining({
@@ -133,6 +138,13 @@ describe("Initializer", async () => {
                 sampleRate: 1,
                 autoSessionTracking: false,
                 sendDefaultPii: false,
+                tracePropagationTargets: [],
+                transport: expect.any(Function),
+                integrations: expect.arrayContaining([
+                  expect.objectContaining({
+                    name: "ElementCallEmbeddedConsent",
+                  }),
+                ]),
               }),
             );
             const options = sentryInitSpy.mock.calls[0][0];
@@ -147,7 +159,7 @@ describe("Initializer", async () => {
         );
 
         it("applies native preference changes to pending reports and future traces", async () => {
-          window.location.hash = `#?sentryDsn=${encodeURIComponent("https://dsn.example.com.localhost")}`;
+          window.location.hash = `#?sentryDsn=${encodeURIComponent("https://dsn.example.com.localhost")}&sentryCrashReportingEnabled=true`;
           await Initializer.init();
           const options = sentryInitSpy.mock.calls[0][0];
           const event = { event_id: "test" };
@@ -159,6 +171,41 @@ describe("Initializer", async () => {
           expect(options.beforeSend(event)).toBe(event);
           expect(options.beforeSendTransaction(event)).toBeNull();
           expect(sentryInitSpy).toHaveBeenCalledTimes(1);
+        });
+
+        it("keeps both channels off when the host revokes before config is ready", async () => {
+          window.location.hash = `#?sentryDsn=${encodeURIComponent("https://dsn.example.com.localhost")}&sentryCrashReportingEnabled=true&sentryPerformanceReportingEnabled=true`;
+          const initialization = Initializer.init();
+          window.controls.setSentryReportingEnabled(false, false);
+          await initialization;
+
+          expect(sentryInitSpy).not.toHaveBeenCalled();
+          window.controls.setSentryReportingEnabled(true, false);
+          expect(sentryInitSpy).toHaveBeenCalledTimes(1);
+          const options = sentryInitSpy.mock.calls[0][0];
+          const event = { event_id: "test" };
+          expect(options.beforeSend(event)).toBe(event);
+          expect(options.beforeSendTransaction(event)).toBeNull();
+        });
+
+        it("honors the latest native grant before config is ready", async () => {
+          window.location.hash = `#?sentryDsn=${encodeURIComponent("https://dsn.example.com.localhost")}`;
+          const initialization = Initializer.init();
+          window.controls.setSentryReportingEnabled(true, false);
+          window.controls.setSentryReportingEnabled(false, true);
+          await initialization;
+
+          expect(sentryInitSpy).toHaveBeenCalledTimes(1);
+          const options = sentryInitSpy.mock.calls[0][0];
+          const event = { event_id: "test" };
+          expect(options.beforeSend(event)).toBeNull();
+          expect(options.beforeSendTransaction(event)).toBe(event);
+        });
+
+        it("does not infer consent from an embedded DSN when reporting flags are absent", async () => {
+          window.location.hash = `#?sentryDsn=${encodeURIComponent("https://dsn.example.com.localhost")}`;
+          await Initializer.init();
+          expect(sentryInitSpy).not.toHaveBeenCalled();
         });
       });
 
@@ -192,20 +239,32 @@ describe("Initializer", async () => {
           expect(sentryInitSpy).not.toHaveBeenCalled();
         });
 
-        it("creates instance with config value", async () => {
+        it("creates instance with config value even if a host control revoked before startup", async () => {
           mockConfig({
             sentry: {
               DSN: "https://dsn.example.com.localhost",
               environment: "fooEnvironment",
             },
           });
-          await Initializer.init();
+          const initialization = Initializer.init();
+          window.controls.setSentryReportingEnabled(false, false);
+          await initialization;
           expect(sentryInitSpy).toHaveBeenCalledWith(
             expect.objectContaining({
               dsn: "https://dsn.example.com.localhost",
               environment: "fooEnvironment",
             }),
           );
+          expect(sentryInitSpy.mock.calls[0][0]).not.toHaveProperty(
+            "transport",
+          );
+          expect(sentryInitSpy.mock.calls[0][0]).not.toHaveProperty(
+            "tracePropagationTargets",
+          );
+          const options = sentryInitSpy.mock.calls[0][0];
+          const event = { event_id: "test" };
+          expect(options.beforeSend(event)).toBe(event);
+          expect(options.beforeSendTransaction(event)).toBe(event);
         });
       });
     });

@@ -41,10 +41,15 @@ import {
 import { i18n, languageOfLocalePath } from "./utils/i18n.ts";
 import {
   configureSentryReporting,
+  resetSentryReporting,
+  embeddedSentryEnvironment,
   sentryErrorsEnabled,
+  sentryErrorsGeneration,
   sentryPerformanceEnabled,
   rewriteEmbeddedCallFrame,
 } from "./analytics/SentryReporting.ts";
+import { configureCallDiagnostics } from "./analytics/CallDiagnostics.ts";
+import { createEmbeddedSentryReporting } from "./analytics/EmbeddedSentryTransport.ts";
 
 // This generates a map of locale names to their URL (based on import.meta.url), which looks like this:
 // {
@@ -111,13 +116,22 @@ const Backend = {
  */
 // Exported for testing
 export function analyticsConfigFromEnvironment(): AnalyticsConfig {
-  const { posthogApiKey, posthogApiHost, posthogUserId, isWidget } =
-    getUrlParams();
+  const {
+    posthogApiKey,
+    posthogApiHost,
+    posthogUserId,
+    usageAnalyticsEnabled,
+    hostCallTelemetryEnabled,
+    isWidget,
+  } = getUrlParams();
+  const embedded = import.meta.env.VITE_PACKAGE === "embedded";
   return {
     matrixBackend: isWidget ? "embedded" : "jssdk",
     hostAnalyticsId: posthogUserId,
-    ...(import.meta.env.VITE_PACKAGE === "embedded"
+    widgetScopedAnalyticsId: embedded && isWidget && hostCallTelemetryEnabled,
+    ...(embedded
       ? {
+          hostUsageAnalyticsEnabled: usageAnalyticsEnabled,
           apiKey: posthogApiKey ?? undefined,
           apiHost: posthogApiHost ?? undefined,
         }
@@ -262,6 +276,7 @@ export class Initializer {
    */
   public static reset(): void {
     Initializer.internalInstance = undefined;
+    resetSentryReporting();
   }
 
   private loadStates = new DependencyLoadStates();
@@ -288,14 +303,18 @@ export class Initializer {
       this.loadStates.sentry === LoadState.None &&
       this.loadStates.config === LoadState.Loaded
     ) {
+      const embedded = import.meta.env.VITE_PACKAGE === "embedded";
+      const release = import.meta.env.VITE_APP_VERSION;
       let dsn: string | undefined;
       let environment: string | undefined;
       let errors = true;
       let performance = true;
-      if (import.meta.env.VITE_PACKAGE === "embedded") {
+      if (embedded) {
         // for the embedded package we always use the values from the URL as the widget host is responsible for analytics configuration
         dsn = getUrlParams().sentryDsn ?? undefined;
-        environment = getUrlParams().sentryEnvironment ?? undefined;
+        environment = embeddedSentryEnvironment(
+          getUrlParams().sentryEnvironment,
+        );
         errors = getUrlParams().sentryCrashReportingEnabled;
         performance = getUrlParams().sentryPerformanceReportingEnabled;
       }
@@ -305,14 +324,34 @@ export class Initializer {
         environment = Config.get().sentry?.environment;
       }
       if (dsn) {
-        configureSentryReporting(errors, performance, () =>
+        const embeddedReporting = embedded
+          ? createEmbeddedSentryReporting(Sentry.makeFetchTransport, {
+              release,
+              environment,
+            })
+          : undefined;
+        configureCallDiagnostics({
+          dsn,
+          environment,
+          release: release || "dev",
+          consent: sentryErrorsEnabled,
+          consentGeneration: sentryErrorsGeneration,
+        });
+        configureSentryReporting({ errors, performance, embedded }, () =>
           Sentry.init({
             dsn,
             environment,
-            release: import.meta.env.VITE_APP_VERSION,
+            release,
+            ...(embeddedReporting
+              ? {
+                  tracePropagationTargets: [],
+                  transport: embeddedReporting.transport,
+                }
+              : {}),
             integrations: [
-              ...(import.meta.env.VITE_PACKAGE === "embedded"
+              ...(embeddedReporting
                 ? [
+                    embeddedReporting.integration,
                     Sentry.rewriteFramesIntegration({
                       iteratee: rewriteEmbeddedCallFrame,
                     }),
@@ -331,7 +370,7 @@ export class Initializer {
               sentryPerformanceEnabled() && context.parentSampled !== false
                 ? 1.0
                 : 0.0,
-            autoSessionTracking: import.meta.env.VITE_PACKAGE !== "embedded",
+            autoSessionTracking: !embedded,
             sendDefaultPii: false,
             beforeSend: (event) => (sentryErrorsEnabled() ? event : null),
             beforeSendTransaction: (event) =>
