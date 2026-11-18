@@ -5,6 +5,7 @@ SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Element-Commercial
 Please see LICENSE in the repository root for full details.
 */
 
+import { webcrypto } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createClient, EventType, MatrixEvent, Room } from "matrix-js-sdk";
 import {
@@ -13,6 +14,7 @@ import {
 } from "matrix-js-sdk/lib/matrixrtc";
 import { BehaviorSubject } from "rxjs";
 import {
+  constant,
   ErrorCode,
   type InitialMicrophonePublication,
   PeerConnectionTimeoutError,
@@ -26,10 +28,13 @@ import {
   observeCallTelemetry,
 } from "./CallTelemetry";
 import { CallTelemetry, type TelemetryEvent } from "../analytics/CallTelemetry";
-import { PosthogAnalytics } from "../analytics/PosthogAnalytics";
+import { participationDigest } from "../analytics/ParticipationGraph";
+import { Anonymity, PosthogAnalytics } from "../analytics/PosthogAnalytics";
 import { nullHostBridge } from "../HostBridge";
 import {
+  flushPromises,
   mockMatrixRoom,
+  mockRTCMember,
   mockRtcMembership,
   mockRTCParticipation,
   MockRTCSession,
@@ -284,6 +289,59 @@ describe("host call telemetry capability", () => {
 });
 
 describe("verified participation generation", () => {
+  const joinId = "0123456789abcdef0123456789abcdef";
+
+  it("uses the first legacy join ID across differing creation and server timestamps", () => {
+    const membership = mockRtcMembership("@alice:example.org", "AAAA");
+    const joinContent = { "io.letro.call.join_id": joinId };
+    const first = legacyEvent(membership, undefined, 9999999999, joinContent);
+    const identity = membershipIdentity(roomWithEvent(first), membership);
+    expect(identity).toMatchObject({ generation: `legacy-join:${joinId}` });
+
+    const remoteRefresh = legacyEvent(
+      membership,
+      1234567890,
+      1111111111,
+      joinContent,
+    );
+    const localRefresh = legacyEvent(
+      membership,
+      2345678901,
+      2222222222,
+      joinContent,
+    );
+    expect(
+      membershipIdentity(roomWithEvent(remoteRefresh), membership),
+    ).toEqual(identity);
+    expect(membershipIdentity(roomWithEvent(localRefresh), membership)).toEqual(
+      identity,
+    );
+  });
+
+  it.each([
+    [undefined],
+    [null],
+    [123],
+    [[joinId]],
+    [joinId.toUpperCase()],
+    [joinId.slice(1)],
+    [`${joinId}\n`],
+    [joinId.replace("f", "g")],
+  ])(
+    "leaves malformed join ID %j unbound without rejecting call membership",
+    async (invalid) => {
+      const original = mockRtcMembership("@alice:example.org", "AAAA");
+      const event = legacyEvent(original, 1234567890, 9999999999, {
+        "io.letro.call.join_id": invalid,
+      });
+      const membership = await CallMembership.parseFromEvent(event);
+      expect(membership.memberId).toBe(original.memberId);
+      expect(
+        membershipIdentity(roomWithEvent(event), membership),
+      ).toBeUndefined();
+    },
+  );
+
   it("uses explicit legacy generation, normalizes the slot, and ignores refresh event timestamps", () => {
     const membership = mockRtcMembership("@alice:example.org", "AAAA", {
       membership: { created_ts: 1234567890 },
@@ -392,6 +450,152 @@ describe("verified participation generation", () => {
   });
 });
 
+describe("local legacy join attribution", () => {
+  beforeEach(() => {
+    vi.stubGlobal("crypto", webcrypto);
+    vi.spyOn(PosthogAnalytics.instance, "getAnonymity").mockReturnValue(
+      Anonymity.Pseudonymous,
+    );
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("binds each short call to its first current echo once despite old memberships and refresh", async () => {
+    const firstJoinId = "1".repeat(32);
+    const secondJoinId = "2".repeat(32);
+    const older = await parsedLegacyMembership("0".repeat(32), 1234567890);
+    const timestampOnly = await parsedLegacyMembership(undefined, 1234567890);
+    const first = await parsedLegacyMembership(firstJoinId);
+    const firstRefresh = await parsedLegacyMembership(firstJoinId, 1234567890);
+    const second = await parsedLegacyMembership(secondJoinId);
+    const secondRefresh = await parsedLegacyMembership(
+      secondJoinId,
+      1234567890,
+    );
+    expect(first.membership.memberId).toBe(second.membership.memberId);
+
+    const firstBinding = await observeLegacyJoin(firstJoinId, {
+      stale: [older, timestampOnly],
+      first,
+      refresh: firstRefresh,
+    });
+    const secondBinding = await observeLegacyJoin(secondJoinId, {
+      stale: [firstRefresh, timestampOnly],
+      first: second,
+      refresh: secondRefresh,
+    });
+    expect(firstBinding).not.toBe(secondBinding);
+  });
+});
+
+async function observeLegacyJoin(
+  joinId: string,
+  {
+    stale,
+    first,
+    refresh,
+  }: {
+    stale: LegacyMembershipFixture[];
+    first: LegacyMembershipFixture;
+    refresh: LegacyMembershipFixture;
+  },
+): Promise<string> {
+  const eventsById = new Map(
+    [...stale, first, refresh].map(({ event }) => [event.getId(), event]),
+  );
+  const room = mockMatrixRoom({
+    roomId: "!fixture:example.org",
+    findEventById: (eventId) => eventsById.get(eventId),
+  });
+  const oldMemberships = stale.map(({ membership }) => membership);
+  const memberships = new BehaviorSubject(oldMemberships);
+  const session = new MockRTCSession(room).withMemberships(memberships);
+  let activeJoinId: string | undefined;
+  Object.defineProperty(session, "localLegacyJoinId", {
+    get: () => activeJoinId,
+  });
+  const states = new BehaviorSubject<ParticipationState>({
+    kind: "connecting",
+  });
+  const scope = testScope();
+  const participation = mockRTCParticipation(scope, {
+    localMember$: constant(
+      mockRTCMember(true, { membership: first.membership }),
+    ),
+    state$: states,
+  });
+  const events: TelemetryEvent[] = [];
+  const telemetry = new CallTelemetry({
+    callKind: "dm",
+    componentVersion: "test",
+    hostAppVersion: "test",
+    hostAppBuild: "test",
+    track: (event) => events.push(event),
+  });
+  const correlations = (): TelemetryEvent[] =>
+    events.filter(({ eventName }) => eventName === "CallCorrelation");
+  const digest = vi.spyOn(crypto.subtle, "digest");
+  observeCallTelemetry(
+    scope,
+    telemetry,
+    participation,
+    session.asMockedSession(),
+    room,
+  );
+  activeJoinId = joinId;
+  memberships.next([...oldMemberships]);
+  expect(digest).not.toHaveBeenCalled();
+  digest.mockRestore();
+
+  states.next({ kind: "connected" });
+  memberships.next([...oldMemberships, first.membership]);
+  const expected = await participationDigest({
+    roomId: room.roomId,
+    slotId: "m.call#room",
+    sender: first.membership.userId,
+    memberId: first.membership.memberId,
+    generation: `legacy-join:${joinId}`,
+  });
+  await vi.waitFor(() => {
+    expect(correlations()).toMatchObject([
+      {
+        correlationKind: "binding",
+        participationId: expected,
+        canonicalRoot: expected,
+      },
+    ]);
+  });
+
+  memberships.next([refresh.membership]);
+  await flushPromises();
+  scope.end();
+  expect(correlations()).toHaveLength(1);
+  expect(
+    events.filter(({ eventName }) => eventName === "CallParticipationEnded"),
+  ).toHaveLength(1);
+  return expected;
+}
+
+type LegacyMembershipFixture = {
+  event: MatrixEvent;
+  membership: CallMembership;
+};
+
+async function parsedLegacyMembership(
+  joinId?: string,
+  timestamp?: number,
+): Promise<LegacyMembershipFixture> {
+  const original = mockRtcMembership("@alice:example.org", "AAAA");
+  const event = legacyEvent(original, timestamp, 9999999999, {
+    membershipID: original.memberId,
+    ...(joinId === undefined ? {} : { "io.letro.call.join_id": joinId }),
+  });
+  return { event, membership: await CallMembership.parseFromEvent(event) };
+}
+
 function roomWithEvent(event: MatrixEvent | undefined): Room {
   return mockMatrixRoom({
     roomId: "!fixture:example.org",
@@ -405,6 +609,7 @@ function legacyEvent(
   membership: CallMembership,
   timestamp: number | undefined,
   eventTs: number,
+  content: Record<string, unknown> = {},
 ): MatrixEvent {
   return new MatrixEvent({
     room_id: "!fixture:example.org",
@@ -420,6 +625,7 @@ function legacyEvent(
       focus_active: { type: "livekit", focus_selection: "multi_sfu" },
       foci_preferred: [],
       ...(timestamp === undefined ? {} : { created_ts: timestamp }),
+      ...content,
     },
   });
 }

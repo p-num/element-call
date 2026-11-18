@@ -21,6 +21,10 @@ describe("participation identity v1", () => {
 
   it.each([
     [
+      "legacy-join:0123456789abcdef0123456789abcdef",
+      "ff620bbc44b5be6fc0cd3a5fa29b9ede999d74c881f58c4f15597580575615ae",
+    ],
+    [
       "legacy:1234567890",
       "1b883baaa40e151769e19ec07db0fb506a3d67fc2967bb6ce726abd95b896add",
     ],
@@ -54,6 +58,10 @@ describe("participation identity v1", () => {
   });
 
   it.each([
+    [
+      "legacy-join:0123456789abcdef0123456789abcdef",
+      "b4e7cea934c52bb6cc69ccf9cd36b772a95fb873982f573431d87ed75c964b0b",
+    ],
     [
       "legacy:1234567890",
       "80c431cf2ce574fbbaf2e75330be7ba177af3c409692ef60662b358f449c890b",

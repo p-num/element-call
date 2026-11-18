@@ -135,17 +135,18 @@ export function observeCallTelemetry(
         PosthogAnalytics.instance.getAnonymity() !== Anonymity.Pseudonymous
       )
         return;
-      const identities = session.memberships
-        .map((membership) => ({
-          membership,
-          identity: membershipIdentity(room, membership),
-        }))
-        .filter((entry) => entry.identity !== undefined);
+      const identities = session.memberships.flatMap((membership) => {
+        const identity = membershipIdentity(room, membership);
+        return identity === undefined ? [] : [{ membership, identity }];
+      });
+      const isLocalDevice = (membership: CallMembership): boolean =>
+        membership.userId === local.userId &&
+        membership.deviceId === local.deviceId;
       const own = identities.find(
-        ({ membership }) =>
-          membership.userId === local.userId &&
-          membership.deviceId === local.deviceId &&
-          membership.memberId === local.memberId,
+        ({ membership, identity }) =>
+          isLocalDevice(membership) &&
+          membership.memberId === local.memberId &&
+          isCurrentLocalGeneration(session, identity.generation),
       );
       if (own === undefined) return;
       const digest = async (
@@ -159,17 +160,21 @@ export function observeCallTelemetry(
         }
         return pending;
       };
-      void Promise.all([
-        digest(own.identity!),
-        Promise.all(identities.map(async ({ identity }) => digest(identity!))),
-      ])
-        .then(([ownDigest, snapshot]) => {
+      // An older membership for this device cannot also be a peer in this attempt.
+      const peers = identities.filter(
+        ({ membership }) => !isLocalDevice(membership),
+      );
+      void Promise.all(
+        [own, ...peers].map(async ({ identity }) => digest(identity)),
+      )
+        .then((snapshot) => {
           if (
             !active ||
+            !isCurrentLocalGeneration(session, own.identity.generation) ||
             PosthogAnalytics.instance.getAnonymity() !== Anonymity.Pseudonymous
           )
             return;
-          for (const update of graph.observe(ownDigest, snapshot))
+          for (const update of graph.observe(snapshot[0], snapshot))
             telemetry.correlation(update);
         })
         .catch(() => {});
@@ -181,6 +186,18 @@ export function observeCallTelemetry(
   });
 }
 
+function isCurrentLocalGeneration(
+  session: MatrixRTCSession,
+  generation: ParticipationIdentity["generation"],
+): boolean {
+  if (generation === "per-join") return true;
+  // Older SDKs never mint an opaque ID for the current legacy join.
+  if (!("localLegacyJoinId" in session))
+    return generation.startsWith("legacy:");
+  const joinId = session.localLegacyJoinId;
+  return typeof joinId === "string" && generation === `legacy-join:${joinId}`;
+}
+
 /** createdTs() falls back to the refreshed event timestamp, which is not a join generation. */
 export function membershipIdentity(
   room: Room,
@@ -190,18 +207,9 @@ export function membershipIdentity(
   if (event === undefined) return undefined;
   try {
     const parsed = CallMembership.membershipDataFromMatrixEvent(event);
-    let generation: ParticipationIdentity["generation"];
-    if (parsed.kind === "rtc") generation = "per-join";
-    else {
-      const timestamp = parsed.data.created_ts;
-      if (
-        timestamp === undefined ||
-        !Number.isSafeInteger(timestamp) ||
-        timestamp < 0
-      )
-        return undefined;
-      generation = `legacy:${BigInt(timestamp)}`;
-    }
+    const generation =
+      parsed.kind === "rtc" ? "per-join" : legacyGeneration(event);
+    if (generation === undefined) return undefined;
     return {
       roomId: room.roomId,
       slotId: normalizedSlot(membership.slotId),
@@ -212,6 +220,32 @@ export function membershipIdentity(
   } catch {
     return undefined;
   }
+}
+
+function legacyGeneration(
+  event: MatrixEvent,
+): ParticipationIdentity["generation"] | undefined {
+  const joinIdField = "io.letro.call.join_id";
+  const content = event.getContent<Record<string, unknown>>();
+  if (Object.hasOwn(content, joinIdField)) {
+    const joinId = content[joinIdField];
+    if (
+      typeof joinId === "string" &&
+      joinId.length === 32 &&
+      /^[0-9a-f]+$/.test(joinId)
+    )
+      return `legacy-join:${joinId}`;
+    return undefined;
+  }
+  const timestamp = content.created_ts;
+  if (
+    Object.hasOwn(content, "created_ts") &&
+    typeof timestamp === "number" &&
+    Number.isSafeInteger(timestamp) &&
+    timestamp >= 0
+  )
+    return `legacy:${BigInt(timestamp)}`;
+  return undefined;
 }
 
 function membershipSourceEvent(

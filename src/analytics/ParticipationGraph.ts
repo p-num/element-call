@@ -10,7 +10,7 @@ export type ParticipationIdentity = {
   slotId: string;
   sender: string;
   memberId: string;
-  generation: "per-join" | `legacy:${bigint}`;
+  generation: "per-join" | `legacy-join:${string}` | `legacy:${bigint}`;
 };
 
 export type CorrelationUpdate =
