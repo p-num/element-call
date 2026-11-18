@@ -374,6 +374,111 @@ describe("identifying the user", () => {
     expect(client.setAccountData).not.toHaveBeenCalled();
   });
 
+  it("delivers typed mobile boundaries with the ingest envelope and retires the widget identity on opt-out", () => {
+    const widgetId = "b6bd305a-4af0-4101-8c81-a04fac79f04f";
+    window.matrixclient = mockClient(null);
+    PosthogAnalytics.configure({
+      ...credentials,
+      matrixBackend: "embedded",
+      hostAnalyticsId: widgetId,
+      hostUsageAnalyticsEnabled: true,
+      widgetScopedAnalyticsId: true,
+    });
+    const init = vi.spyOn(posthog, "init").mockImplementation(() => posthog);
+    const register = vi.spyOn(posthog, "register").mockImplementation(() => {});
+    const identify = vi.spyOn(posthog, "identify");
+    const reset = vi.spyOn(posthog, "reset").mockImplementation(() => {});
+    const analytics = PosthogAnalytics.instance;
+    const config = init.mock.calls[0][1]!;
+    expect(config).toMatchObject({
+      persistence: "memory",
+      person_profiles: "never",
+      request_batching: false,
+    });
+    const beforeSend = config.before_send;
+    if (typeof beforeSend !== "function")
+      throw new Error("Expected a PostHog before_send hook");
+    const captured: CaptureResult[] = [];
+    const capture = vi
+      .spyOn(posthog, "capture")
+      .mockImplementation((event, properties) => {
+        const payload = beforeSend({
+          event,
+          properties: {
+            ...properties,
+            token: credentials.apiKey,
+            distinct_id: widgetId,
+            $process_person_profile: false,
+            $session_id: "sdk-session-id",
+            $device_id: "sdk-device-id",
+            $current_url: "https://call.example/?userId=@user:example.org",
+          },
+        } as CaptureResult);
+        if (payload) captured.push(payload);
+        return payload ?? undefined;
+      });
+    analytics.callLifetime();
+    analytics.trackCallEvent({ eventName: "CallJoinAttempted" });
+    analytics.trackCallEvent({
+      eventName: "CallCorrelation",
+      correlationKind: "binding",
+      participationId: "a".repeat(64),
+      canonicalRoot: "b".repeat(64),
+    });
+    expect(register).toHaveBeenCalledWith({ distinct_id: widgetId });
+    expect(identify).not.toHaveBeenCalled();
+    const envelope = {
+      token: credentials.apiKey,
+      distinct_id: widgetId,
+      $process_person_profile: false,
+    };
+    expect(captured).toEqual([
+      { event: "CallJoinAttempted", properties: envelope },
+      {
+        event: "CallCorrelation",
+        properties: {
+          ...envelope,
+          correlationKind: "binding",
+          participationId: "a".repeat(64),
+          canonicalRoot: "b".repeat(64),
+        },
+      },
+    ]);
+
+    PosthogAnalytics.setUsageAnalyticsEnabled(false);
+    analytics.trackCallEvent({ eventName: "CallParticipationEnded" });
+    PosthogAnalytics.setUsageAnalyticsEnabled(true);
+    analytics.callLifetime();
+    analytics.trackCallEvent({ eventName: "CallParticipationEnded" });
+    expect(reset).toHaveBeenCalled();
+    expect(capture).toHaveBeenCalledTimes(2);
+    expect(
+      beforeSend({
+        event: "CallParticipationEnded",
+        properties: envelope,
+      } as CaptureResult),
+    ).toBeNull();
+  });
+
+  it.each([undefined, "@raw:example.org"])(
+    "cannot report from a mobile widget with an absent or invalid identity (%s)",
+    (hostAnalyticsId) => {
+      window.matrixclient = mockClient(null);
+      PosthogAnalytics.configure({
+        ...credentials,
+        matrixBackend: "embedded",
+        hostAnalyticsId,
+        hostUsageAnalyticsEnabled: true,
+        widgetScopedAnalyticsId: true,
+      });
+      const capture = vi.spyOn(posthog, "capture");
+      const analytics = PosthogAnalytics.instance;
+      analytics.callLifetime();
+      analytics.trackCallEvent({ eventName: "CallJoinAttempted" });
+      expect(capture).not.toHaveBeenCalled();
+    },
+  );
+
   it("captures final call events synchronously and drops them immediately on logout", () => {
     window.matrixclient = mockClient(null);
     PosthogAnalytics.configure({

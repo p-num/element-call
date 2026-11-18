@@ -117,11 +117,16 @@ export function analyticsConfigFromEnvironment(): AnalyticsConfig {
     posthogApiHost,
     posthogUserId,
     usageAnalyticsEnabled,
+    hostCallTelemetryEnabled,
     isWidget,
   } = getUrlParams();
   return {
     matrixBackend: isWidget ? "embedded" : "jssdk",
     hostAnalyticsId: posthogUserId,
+    widgetScopedAnalyticsId:
+      isWidget &&
+      hostCallTelemetryEnabled &&
+      import.meta.env.VITE_PACKAGE === "embedded",
     ...(isWidget || import.meta.env.VITE_PACKAGE === "embedded"
       ? { hostUsageAnalyticsEnabled: usageAnalyticsEnabled }
       : {}),

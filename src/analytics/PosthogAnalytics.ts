@@ -129,7 +129,9 @@ export function santizeSensitiveData(
     ].includes(event.event)
   ) {
     const allowed = new Set([
+      "token",
       "distinct_id",
+      "$process_person_profile",
       "callImplementation",
       "callPlatform",
       "callComponentVersion",
@@ -201,11 +203,15 @@ export interface AnalyticsConfig {
   matrixBackend: "embedded" | "jssdk";
   /** The analytics ID the host has assigned to this user, when embedded. */
   hostAnalyticsId?: string | null;
+  /** The native widget assigned a fresh ID for this instance only. */
+  widgetScopedAnalyticsId?: boolean;
   hostUsageAnalyticsEnabled?: boolean;
 }
 
 /** Analytics are off until someone asks for them. */
 const analyticsDisabled: AnalyticsConfig = { matrixBackend: "jssdk" };
+const widgetAnalyticsIdPattern =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 export class PosthogAnalytics {
   /* Wrapper for Posthog analytics.
@@ -230,6 +236,7 @@ export class PosthogAnalytics {
   private static hostUsageOverride: boolean | undefined;
 
   private identificationPromise?: Promise<void>;
+  private hostAnalyticsId?: string | null;
   private identifiedGeneration: number | undefined;
   private identificationPending = false;
   private identificationRevision = 0;
@@ -274,6 +281,8 @@ export class PosthogAnalytics {
     this.callGeneration++;
     this.internalInstance?.clearCallIdentity();
     this.internalInstance?.optInListener?.unsubscribe();
+    if (this.internalInstance?.config.widgetScopedAnalyticsId)
+      this.internalInstance.logout();
     this.hostUsageOverride = undefined;
     this.internalInstance = null;
     this.analyticsConfig = analyticsDisabled;
@@ -283,21 +292,41 @@ export class PosthogAnalytics {
     private readonly posthog: PostHog,
     private readonly config: AnalyticsConfig,
   ) {
+    const hostUsageEnabled =
+      PosthogAnalytics.hostUsageOverride ??
+      config.hostUsageAnalyticsEnabled === true;
+    this.hostAnalyticsId = config.hostAnalyticsId;
+    if (
+      config.widgetScopedAnalyticsId &&
+      (!hostUsageEnabled ||
+        !widgetAnalyticsIdPattern.test(this.hostAnalyticsId ?? ""))
+    )
+      this.hostAnalyticsId = null;
     if (
       config.matrixBackend === "embedded" ||
       config.hostUsageAnalyticsEnabled !== undefined ||
       PosthogAnalytics.hostUsageOverride !== undefined
     )
-      optInAnalytics.setRuntimeValue(
-        PosthogAnalytics.hostUsageOverride ??
-          config.hostUsageAnalyticsEnabled === true,
-        "host-initial",
-      );
+      optInAnalytics.setRuntimeValue(hostUsageEnabled, "host-initial");
     const { apiKey, apiHost } = config;
 
     if (apiKey && apiHost) {
-      const beforeSend = (event: CaptureResult | null): CaptureResult | null =>
-        santizeSensitiveData(event, this.anonymity);
+      const beforeSend = (event: CaptureResult | null): CaptureResult | null => {
+        if (this.config.widgetScopedAnalyticsId) {
+          if (
+            !event ||
+            !this.hostAnalyticsId ||
+            this.anonymity !== Anonymity.Pseudonymous ||
+            this.identifiedGeneration !== PosthogAnalytics.callGeneration ||
+            event.properties.distinct_id !== this.hostAnalyticsId
+          )
+            return null;
+          delete event.properties.$session_id;
+          delete event.properties.$window_id;
+          return santizeSensitiveData(event, Anonymity.Anonymous);
+        }
+        return santizeSensitiveData(event, this.anonymity);
+      };
       this.posthog.init(apiKey, {
         api_host: apiHost,
         autocapture: false,
@@ -305,6 +334,14 @@ export class PosthogAnalytics {
         mask_all_element_attributes: true,
         mask_personal_data_properties: true,
         capture_pageview: false,
+        ...(config.widgetScopedAnalyticsId
+          ? {
+              persistence: "memory",
+              person_profiles: "never",
+              request_batching: false,
+              disable_session_recording: true,
+            }
+          : {}),
         before_send: beforeSend,
         respect_dnt: true,
         advanced_disable_decide: true,
@@ -359,6 +396,7 @@ export class PosthogAnalytics {
     ) {
       PosthogAnalytics.callGeneration++;
       this.clearCallIdentity();
+      if (this.config.widgetScopedAnalyticsId) this.hostAnalyticsId = null;
     }
     // Update this.anonymity.
     // To update the anonymity typically you want to call updateAnonymityFromSettings
@@ -395,7 +433,7 @@ export class PosthogAnalytics {
         // different devices to send the same ID.
         let analyticsID =
           this.config.matrixBackend === "embedded"
-            ? this.config.hostAnalyticsId
+            ? this.hostAnalyticsId
             : await this.getAnalyticsId();
         if (
           generation !== PosthogAnalytics.callGeneration ||
@@ -429,7 +467,12 @@ export class PosthogAnalytics {
         )
           return;
         if (analyticsID) {
-          this.posthog.identify(analyticsID);
+          if (this.config.widgetScopedAnalyticsId) {
+            // Set the capture identity without creating or merging a person profile.
+            this.posthog.register({ distinct_id: analyticsID });
+          } else {
+            this.posthog.identify(analyticsID);
+          }
           this.identifiedGeneration = generation;
           this.identificationPending = false;
           const pending = this.pendingCallEvents;
@@ -455,7 +498,7 @@ export class PosthogAnalytics {
   private async getAnalyticsId(): Promise<string | null> {
     const client: MatrixClient = window.matrixclient;
     if (this.config.matrixBackend === "embedded") {
-      return this.config.hostAnalyticsId ?? null;
+      return this.hostAnalyticsId ?? null;
     } else {
       const accountData = await client.getAccountDataFromServer(
         PosthogAnalytics.ANALYTICS_EVENT_TYPE,
@@ -489,6 +532,7 @@ export class PosthogAnalytics {
     if (this.enabled) {
       this.posthog.reset();
     }
+    if (this.config.widgetScopedAnalyticsId) this.hostAnalyticsId = null;
     this.optInListener?.unsubscribe();
     this.optInListener = null;
     this.setAnonymity(Anonymity.Disabled);
@@ -558,7 +602,9 @@ export class PosthogAnalytics {
       if (
         generation !== PosthogAnalytics.callGeneration ||
         this.anonymity == Anonymity.Disabled ||
-        this.anonymity == Anonymity.Anonymous
+        this.anonymity == Anonymity.Anonymous ||
+        (this.config.widgetScopedAnalyticsId &&
+          this.identifiedGeneration !== generation)
       )
         return;
       this.capture(eventName, properties, options);
