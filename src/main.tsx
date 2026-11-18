@@ -29,6 +29,7 @@ import { Initializer } from "./initializer";
 import { AppViewModel } from "./state/AppViewModel";
 import { globalScope } from "./state/ObservableScope";
 import { getUrlParams } from "./UrlParams";
+import { deferHostReportingUntilReady } from "./controls";
 
 initRageshake().catch((e) => {
   logger.error("Failed to initialize rageshake", e);
@@ -55,6 +56,23 @@ if (fatalError !== null) {
   throw fatalError; // Stop the app early
 }
 
+const {
+  isWidget,
+  hostCallTelemetryEnabled,
+  usageAnalyticsEnabled,
+  sentryCrashReportingEnabled,
+  sentryPerformanceReportingEnabled,
+} = getUrlParams();
+const applyHostReportingChoices =
+  import.meta.env.VITE_PACKAGE === "embedded" &&
+  isWidget &&
+  hostCallTelemetryEnabled &&
+  !usageAnalyticsEnabled &&
+  !sentryCrashReportingEnabled &&
+  !sentryPerformanceReportingEnabled
+    ? deferHostReportingUntilReady()
+    : undefined;
+
 Initializer.initBeforeReact()
   .then(async (widget) => {
     await Config.init();
@@ -80,6 +98,7 @@ Initializer.initBeforeReact()
             })
           }
           widget={widget}
+          applyHostReportingChoices={applyHostReportingChoices}
         />
       </StrictMode>,
     );

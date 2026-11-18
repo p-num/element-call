@@ -7,7 +7,7 @@ Please see LICENSE in the repository root for full details.
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import "./controls";
+import { deferHostReportingUntilReady } from "./controls";
 import { PosthogAnalytics } from "./analytics/PosthogAnalytics";
 import {
   sentryErrorsEnabled,
@@ -46,6 +46,56 @@ describe("native host reporting controls", () => {
     expect(optInAnalytics.getValue()).toBe(false);
     expect(sentryErrorsEnabled()).toBe(true);
     expect(sentryPerformanceEnabled()).toBe(false);
+  });
+
+  it("applies the latest choices before releasing the call on the host's acknowledgement", async () => {
+    optInAnalytics.setRuntimeValue(false, "host-initial");
+    const acknowledgement = Promise.withResolvers<void>();
+    const releaseCall = deferHostReportingUntilReady();
+    const callReady = vi.fn(() => [
+      optInAnalytics.getValue(),
+      sentryErrorsEnabled(),
+      sentryPerformanceEnabled(),
+    ]);
+    const ready = releaseCall(acknowledgement.promise).then(callReady);
+
+    window.controls.setUsageAnalyticsEnabled(true);
+    window.controls.setSentryReportingEnabled(true, true);
+    window.controls.setSentryReportingEnabled(false, true);
+    await Promise.resolve();
+    expect(callReady).not.toHaveBeenCalled();
+    expect(optInAnalytics.getValue()).toBe(false);
+    expect(sentryErrorsEnabled()).toBe(false);
+    expect(sentryPerformanceEnabled()).toBe(false);
+
+    acknowledgement.resolve();
+    await expect(ready).resolves.toEqual([true, false, true]);
+    expect(callReady).toHaveBeenCalledOnce();
+  });
+
+  it("discards unacknowledged grants and releases the call on timeout", async () => {
+    optInAnalytics.setRuntimeValue(false, "host-initial");
+    vi.useFakeTimers();
+    try {
+      const acknowledgement = Promise.withResolvers<void>();
+      const releaseCall = deferHostReportingUntilReady();
+      const ready = releaseCall(acknowledgement.promise);
+      window.controls.setUsageAnalyticsEnabled(true);
+      window.controls.setSentryReportingEnabled(true, true);
+
+      await vi.advanceTimersByTimeAsync(2_000);
+      await ready;
+      acknowledgement.resolve();
+      await Promise.resolve();
+
+      expect(optInAnalytics.getValue()).toBe(false);
+      expect(sentryErrorsEnabled()).toBe(false);
+      expect(sentryPerformanceEnabled()).toBe(false);
+      window.controls.setSentryReportingEnabled(true, false);
+      expect(sentryErrorsEnabled()).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("keeps a crash-only attempt current through redundant false and later opt-in", () => {

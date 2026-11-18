@@ -41,6 +41,7 @@ import {
 import { i18n, languageOfLocalePath } from "./utils/i18n.ts";
 import {
   configureSentryReporting,
+  resetSentryReporting,
   embeddedSentryEnvironment,
   sentryErrorsEnabled,
   sentryErrorsGeneration,
@@ -275,6 +276,7 @@ export class Initializer {
    */
   public static reset(): void {
     Initializer.internalInstance = undefined;
+    resetSentryReporting();
   }
 
   private loadStates = new DependencyLoadStates();
@@ -335,7 +337,7 @@ export class Initializer {
           consent: sentryErrorsEnabled,
           consentGeneration: sentryErrorsGeneration,
         });
-        configureSentryReporting(errors, performance, () =>
+        configureSentryReporting({ errors, performance, embedded }, () =>
           Sentry.init({
             dsn,
             environment,

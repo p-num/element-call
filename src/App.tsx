@@ -114,9 +114,10 @@ interface Props {
   vm: AppViewModel;
   /** A point of access to the widget API, if running as a widget. */
   widget: WidgetHelpers | null;
+  applyHostReportingChoices?: (acknowledgement: Promise<void>) => Promise<void>;
 }
 
-export const App: FC<Props> = ({ vm, widget }) => {
+export const App: FC<Props> = ({ vm, widget, applyHostReportingChoices }) => {
   // The standalone build has no host; the widget build's host is the client it
   // is a widget of.
   const hostBridge = useInitial(() =>
@@ -127,8 +128,16 @@ export const App: FC<Props> = ({ vm, widget }) => {
     Initializer.init()
       ?.then(async () => {
         if (loaded) return;
-        setLoaded(true);
-        await hostBridge.contentLoaded();
+        if (applyHostReportingChoices) {
+          try {
+            await applyHostReportingChoices(hostBridge.contentLoaded());
+          } finally {
+            setLoaded(true);
+          }
+        } else {
+          setLoaded(true);
+          await hostBridge.contentLoaded();
+        }
       })
       .catch(logger.error);
   });

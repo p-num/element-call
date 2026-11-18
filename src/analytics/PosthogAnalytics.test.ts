@@ -24,6 +24,7 @@ import {
 } from "./PosthogAnalytics";
 import { mockConfig } from "../utils/test";
 import { analyticsConfigFromEnvironment } from "../initializer";
+import { deferHostReportingUntilReady } from "../controls";
 import { optInAnalytics } from "../settings/settings";
 import { CallTelemetry } from "./CallTelemetry";
 
@@ -453,6 +454,48 @@ describe("identifying the user", () => {
       vi.unstubAllGlobals();
     }
   });
+
+  it("sends the first join event only after the host acknowledges its live grant", async () => {
+    const { send } = observePosthogRequests();
+    const analytics = startScopedWidget(widgetId, false);
+    const event = { eventName: "CallJoinAttempted", ...scopedCore } as const;
+    const acknowledgement = Promise.withResolvers<void>();
+    const ready = deferHostReportingUntilReady()(acknowledgement.promise).then(
+      () => analytics.trackCallEvent(event),
+    );
+
+    window.controls.setUsageAnalyticsEnabled(false);
+    window.controls.setUsageAnalyticsEnabled(true);
+    analytics.trackCallEvent(event);
+    expect(send).not.toHaveBeenCalled();
+
+    acknowledgement.resolve();
+    await ready;
+    expect(send).toHaveBeenCalledOnce();
+    expect(parsePosthogBody(send.mock.calls[0][0]).batch[0].properties).toEqual(
+      expect.objectContaining({ distinct_id: widgetId }),
+    );
+
+    PosthogAnalytics.setUsageAnalyticsEnabled(false);
+    PosthogAnalytics.setUsageAnalyticsEnabled(true);
+    analytics.trackCallEvent(event);
+    expect(send).toHaveBeenCalledOnce();
+  });
+
+  it.each([false, true])(
+    "retires a widget ID after opt-out before PostHog starts (initial usage %s)",
+    (initialUsage) => {
+      const { send } = observePosthogRequests();
+      if (!initialUsage) PosthogAnalytics.setUsageAnalyticsEnabled(true);
+      PosthogAnalytics.setUsageAnalyticsEnabled(false);
+      PosthogAnalytics.setUsageAnalyticsEnabled(true);
+      startScopedWidget(widgetId, initialUsage).trackCallEvent({
+        eventName: "CallJoinAttempted",
+        ...scopedCore,
+      });
+      expect(send).not.toHaveBeenCalled();
+    },
+  );
 
   it("delivers typed mobile boundaries with the ingest envelope and retires the widget identity on opt-out", () => {
     const { init, send } = observePosthogRequests();
@@ -888,13 +931,16 @@ describe("identifying the user", () => {
     );
   });
 
-  function startScopedWidget(hostAnalyticsId: string): PosthogAnalytics {
+  function startScopedWidget(
+    hostAnalyticsId: string,
+    hostUsageAnalyticsEnabled = true,
+  ): PosthogAnalytics {
     window.matrixclient = mockClient(null);
     PosthogAnalytics.configure({
       ...credentials,
       matrixBackend: "embedded",
       hostAnalyticsId,
-      hostUsageAnalyticsEnabled: true,
+      hostUsageAnalyticsEnabled,
       widgetScopedAnalyticsId: true,
     });
     const analytics = PosthogAnalytics.instance;

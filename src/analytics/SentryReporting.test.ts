@@ -51,7 +51,10 @@ describe("native Sentry reporting choices", () => {
 
   it("starts lazily and revokes each collection channel during a call", () => {
     const start = vi.fn();
-    configureSentryReporting(false, false, start);
+    configureSentryReporting(
+      { errors: false, performance: false, embedded: true },
+      start,
+    );
     expect(start).not.toHaveBeenCalled();
     setSentryReportingEnabled(true, false);
     expect(start).toHaveBeenCalledTimes(1);

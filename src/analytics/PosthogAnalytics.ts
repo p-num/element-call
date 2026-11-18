@@ -187,6 +187,8 @@ export class PosthogAnalytics {
   private static internalInstance: PosthogAnalytics | null = null;
   private static callGeneration = 0;
   private static hostUsageOverride: boolean | undefined;
+  private static hostUsageDenial: "none" | "before-grant" | "after-grant" =
+    "none";
 
   private identificationPromise?: Promise<void>;
   private hostAnalyticsId?: string | null;
@@ -234,6 +236,7 @@ export class PosthogAnalytics {
     if (this.internalInstance?.config.widgetScopedAnalyticsId)
       this.internalInstance.logout();
     this.hostUsageOverride = undefined;
+    this.hostUsageDenial = "none";
     this.internalInstance = null;
     this.analyticsConfig = analyticsDisabled;
   }
@@ -251,7 +254,7 @@ export class PosthogAnalytics {
     this.hostAnalyticsId = config.hostAnalyticsId;
     if (
       config.widgetScopedAnalyticsId &&
-      (!hostUsageEnabled ||
+      (PosthogAnalytics.isWidgetIdentityRevoked(config) ||
         !widgetAnalyticsIdPattern.test(this.hostAnalyticsId ?? ""))
     )
       this.hostAnalyticsId = null;
@@ -605,6 +608,19 @@ export class PosthogAnalytics {
 
   public static setUsageAnalyticsEnabled(enabled: boolean): void {
     enabled = enabled === true;
+    if (!enabled) {
+      if (this.hostUsageOverride === true) {
+        this.hostUsageDenial = "after-grant";
+      } else if (this.hostUsageDenial === "none") {
+        this.hostUsageDenial = "before-grant";
+      }
+      const instance = this.internalInstance;
+      if (
+        instance?.config.widgetScopedAnalyticsId &&
+        this.isWidgetIdentityRevoked(instance.config)
+      )
+        instance.hostAnalyticsId = null;
+    }
     this.hostUsageOverride = enabled;
     const previous = optInAnalytics.getValue();
     if (previous === enabled) return;
@@ -613,6 +629,15 @@ export class PosthogAnalytics {
       this.internalInstance?.clearCallIdentity();
     }
     optInAnalytics.setRuntimeValue(enabled, "host-live");
+  }
+
+  private static isWidgetIdentityRevoked(config: AnalyticsConfig): boolean {
+    // A host can stage an ID with usage disabled, then grant once the widget is ready.
+    return (
+      this.hostUsageDenial === "after-grant" ||
+      (this.hostUsageDenial === "before-grant" &&
+        config.hostUsageAnalyticsEnabled === true)
+    );
   }
 
   public startListeningToSettingsChanges(): void {

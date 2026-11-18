@@ -106,10 +106,49 @@ export const setPlaybackStarted = (): void => {
   }
 };
 
+let stagedReportingChoices:
+  | {
+      usage?: boolean;
+      sentry?: Parameters<Controls["setSentryReportingEnabled"]>;
+    }
+  | undefined;
+
+export function deferHostReportingUntilReady(): (
+  acknowledgement: Promise<void>,
+) => Promise<void> {
+  const choices: NonNullable<typeof stagedReportingChoices> = {};
+  stagedReportingChoices = choices;
+  return async (acknowledgement) => {
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    try {
+      // Native applies the current choices before replying to content_loaded.
+      const acknowledged = await Promise.race([
+        acknowledgement.then(() => true),
+        new Promise<false>((resolve) => {
+          timeout = setTimeout(() => resolve(false), 2_000);
+        }),
+      ]);
+      if (!acknowledged) return;
+      if (choices.usage !== undefined)
+        PosthogAnalytics.setUsageAnalyticsEnabled(choices.usage);
+      if (choices.sentry) setSentryReportingEnabled(...choices.sentry);
+    } finally {
+      clearTimeout(timeout);
+      stagedReportingChoices = undefined;
+    }
+  };
+}
+
 window.controls = {
-  setUsageAnalyticsEnabled: (enabled) =>
-    PosthogAnalytics.setUsageAnalyticsEnabled(enabled),
-  setSentryReportingEnabled,
+  setUsageAnalyticsEnabled: (enabled) => {
+    if (stagedReportingChoices) stagedReportingChoices.usage = enabled;
+    else PosthogAnalytics.setUsageAnalyticsEnabled(enabled);
+  },
+  setSentryReportingEnabled: (errors, performance) => {
+    if (stagedReportingChoices)
+      stagedReportingChoices.sentry = [errors, performance];
+    else setSentryReportingEnabled(errors, performance);
+  },
   canEnterPip(): boolean {
     return setPipEnabled$.observed;
   },
