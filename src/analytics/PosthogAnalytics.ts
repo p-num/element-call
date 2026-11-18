@@ -609,17 +609,14 @@ export class PosthogAnalytics {
   public static setUsageAnalyticsEnabled(enabled: boolean): void {
     enabled = enabled === true;
     if (!enabled) {
-      if (this.hostUsageOverride === true) {
-        this.hostUsageDenial = "after-grant";
+      if (
+        this.hostUsageOverride === true ||
+        this.internalInstance?.config.hostUsageAnalyticsEnabled === true
+      ) {
+        this.retireScopedWidgetIdentity();
       } else if (this.hostUsageDenial === "none") {
         this.hostUsageDenial = "before-grant";
       }
-      const instance = this.internalInstance;
-      if (
-        instance?.config.widgetScopedAnalyticsId &&
-        this.isWidgetIdentityRevoked(instance.config)
-      )
-        instance.hostAnalyticsId = null;
     }
     this.hostUsageOverride = enabled;
     const previous = optInAnalytics.getValue();
@@ -629,6 +626,13 @@ export class PosthogAnalytics {
       this.internalInstance?.clearCallIdentity();
     }
     optInAnalytics.setRuntimeValue(enabled, "host-live");
+  }
+
+  public static retireScopedWidgetIdentity(): void {
+    this.hostUsageDenial = "after-grant";
+    const instance = this.internalInstance;
+    if (instance?.config.widgetScopedAnalyticsId)
+      instance.hostAnalyticsId = null;
   }
 
   private static isWidgetIdentityRevoked(config: AnalyticsConfig): boolean {

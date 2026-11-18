@@ -120,6 +120,7 @@ export function deferHostReportingUntilReady(): (
   stagedReportingChoices = choices;
   return async (acknowledgement) => {
     let timeout: ReturnType<typeof setTimeout> | undefined;
+    let acceptedUsageGrant = false;
     try {
       // Native applies the current choices before replying to content_loaded.
       const acknowledged = await Promise.race([
@@ -129,11 +130,13 @@ export function deferHostReportingUntilReady(): (
         }),
       ]);
       if (!acknowledged) return;
+      acceptedUsageGrant = choices.usage === true;
       if (choices.usage !== undefined)
         PosthogAnalytics.setUsageAnalyticsEnabled(choices.usage);
       if (choices.sentry) setSentryReportingEnabled(...choices.sentry);
     } finally {
       clearTimeout(timeout);
+      if (!acceptedUsageGrant) PosthogAnalytics.retireScopedWidgetIdentity();
       stagedReportingChoices = undefined;
     }
   };
@@ -141,8 +144,13 @@ export function deferHostReportingUntilReady(): (
 
 window.controls = {
   setUsageAnalyticsEnabled: (enabled) => {
-    if (stagedReportingChoices) stagedReportingChoices.usage = enabled;
-    else PosthogAnalytics.setUsageAnalyticsEnabled(enabled);
+    if (stagedReportingChoices) {
+      stagedReportingChoices.usage = enabled;
+      // The host supplied a staged ID only after consent. An explicit false revokes it.
+      if (enabled === false) PosthogAnalytics.retireScopedWidgetIdentity();
+    } else {
+      PosthogAnalytics.setUsageAnalyticsEnabled(enabled);
+    }
   },
   setSentryReportingEnabled: (errors, performance) => {
     if (stagedReportingChoices)

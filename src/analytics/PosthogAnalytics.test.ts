@@ -464,7 +464,6 @@ describe("identifying the user", () => {
       () => analytics.trackCallEvent(event),
     );
 
-    window.controls.setUsageAnalyticsEnabled(false);
     window.controls.setUsageAnalyticsEnabled(true);
     analytics.trackCallEvent(event);
     expect(send).not.toHaveBeenCalled();
@@ -482,6 +481,30 @@ describe("identifying the user", () => {
     expect(send).toHaveBeenCalledOnce();
   });
 
+  it.each([true, false])(
+    "a staged false then true keeps the widget ID retired (PostHog already started %s)",
+    async (alreadyStarted) => {
+      const { send } = observePosthogRequests();
+      const existing = alreadyStarted
+        ? startScopedWidget(widgetId, false)
+        : null;
+      const acknowledgement = Promise.withResolvers<void>();
+      const ready = deferHostReportingUntilReady()(acknowledgement.promise);
+
+      window.controls.setUsageAnalyticsEnabled(false);
+      window.controls.setUsageAnalyticsEnabled(true);
+      acknowledgement.resolve();
+      await ready;
+
+      const analytics = existing ?? startScopedWidget(widgetId, false);
+      analytics.trackCallEvent({
+        eventName: "CallJoinAttempted",
+        ...scopedCore,
+      });
+      expect(send).not.toHaveBeenCalled();
+    },
+  );
+
   it.each([false, true])(
     "retires a widget ID after opt-out before PostHog starts (initial usage %s)",
     (initialUsage) => {
@@ -496,6 +519,29 @@ describe("identifying the user", () => {
       expect(send).not.toHaveBeenCalled();
     },
   );
+
+  it("discards a staged widget ID if its first grant is not acknowledged", async () => {
+    const { send } = observePosthogRequests();
+    const analytics = startScopedWidget(widgetId, false);
+    const acknowledgement = Promise.withResolvers<void>();
+    vi.useFakeTimers();
+    try {
+      const ready = deferHostReportingUntilReady()(acknowledgement.promise);
+      window.controls.setUsageAnalyticsEnabled(true);
+      await vi.advanceTimersByTimeAsync(2_000);
+      await ready;
+
+      window.controls.setUsageAnalyticsEnabled(true);
+      acknowledgement.resolve();
+      analytics.trackCallEvent({
+        eventName: "CallJoinAttempted",
+        ...scopedCore,
+      });
+      expect(send).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 
   it("delivers typed mobile boundaries with the ingest envelope and retires the widget identity on opt-out", () => {
     const { init, send } = observePosthogRequests();
