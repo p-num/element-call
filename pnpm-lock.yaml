@@ -4761,7 +4761,7 @@ packages:
 
   matrix-js-sdk@git+https://git.postnumber.com/letro/matrix-js-sdk.git#197ec5aa0d4caf61a6be286adea2f727d0dd3024:
     resolution: {commit: 197ec5aa0d4caf61a6be286adea2f727d0dd3024, repo: https://git.postnumber.com/letro/matrix-js-sdk.git, type: git}
-    version: 44.0.0-letro.1
+    version: 44.0.0-letro.2
     engines: {node: '>=22.0.0'}
 
   matrix-widget-api@1.20.0:
