@@ -170,6 +170,24 @@ describe("call telemetry attempt", () => {
     ).toMatchObject([{ outcome: "connected" }]);
   });
 
+  it("records ringing once when notification sending completes after media connects", () => {
+    const { call, events } = fixture();
+    call.connection(true);
+    call.ringing();
+    call.ringing();
+    expect(phases(events)).toEqual(["initiation", "connected", "ringing"]);
+    call.end();
+    const count = events.length;
+    call.ringing();
+    expect(events).toHaveLength(count);
+    expect(phases(events)).toEqual([
+      "initiation",
+      "connected",
+      "ringing",
+      "terminated",
+    ]);
+  });
+
   it("deduplicates disconnections and reconnections, then emits one connected participation end", () => {
     const { call, events, advance } = fixture();
     call.connection(false);

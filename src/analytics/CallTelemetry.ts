@@ -118,14 +118,7 @@ export class CallTelemetry {
   }
 
   public ringing(): void {
-    if (
-      !this.isCurrent() ||
-      this.terminal ||
-      this.ending ||
-      this.rang ||
-      this.connectedAt !== undefined
-    )
-      return;
+    if (!this.isCurrent() || this.terminal || this.ending || this.rang) return;
     this.rang = true;
     this.lifecycle("ringing");
   }
