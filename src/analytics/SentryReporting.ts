@@ -10,6 +10,7 @@ import { type StackFrame } from "@sentry/react";
 let errorsEnabled = false;
 let errorsGeneration = 0;
 let performanceEnabled = false;
+let performanceGeneration = 0;
 let initialize: (() => void) | undefined;
 
 export function configureSentryReporting(
@@ -26,6 +27,7 @@ export function setSentryReportingEnabled(
   performance: boolean,
 ): void {
   if (errorsEnabled && !errors) errorsGeneration++;
+  if (performanceEnabled && !performance) performanceGeneration++;
   errorsEnabled = errors;
   performanceEnabled = performance;
   if ((errors || performance) && initialize) {
@@ -45,6 +47,10 @@ export function sentryErrorsGeneration(): number {
 
 export function sentryPerformanceEnabled(): boolean {
   return performanceEnabled;
+}
+
+export function sentryPerformanceGeneration(): number {
+  return performanceGeneration;
 }
 
 export function embeddedSentryEnvironment(environment?: string | null): string {

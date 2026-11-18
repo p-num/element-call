@@ -7,6 +7,8 @@ Please see LICENSE in the repository root for full details.
 
 import {
   type Event,
+  type EventHint,
+  type getClient,
   type makeFetchTransport,
   type StackFrame,
 } from "@sentry/react";
@@ -15,25 +17,51 @@ import {
   embeddedSentryEnvironment,
   rewriteEmbeddedCallFrame,
   sentryErrorsEnabled,
+  sentryErrorsGeneration,
   sentryPerformanceEnabled,
+  sentryPerformanceGeneration,
 } from "./SentryReporting";
 
 type Transport = ReturnType<typeof makeFetchTransport>;
 type Envelope = Parameters<Transport["send"]>[0];
+type Client = NonNullable<ReturnType<typeof getClient>>;
+type EventType = "event" | "transaction";
+type CaptureConsent = { type: EventType; generation: number };
 
-/** Internal SDK errors bypass beforeSend, and trace names can live in the envelope header. */
-export function embeddedSentryTransport(
-  transport: typeof makeFetchTransport,
+export function createEmbeddedSentryReporting(
+  delegateTransport: typeof makeFetchTransport,
   metadata: Pick<Event, "environment" | "release">,
-): typeof makeFetchTransport {
-  return (options) => {
-    const delegate = transport({
+) {
+  const captured = new WeakMap<EventHint, CaptureConsent>();
+  const dispatchable = new WeakMap<object, CaptureConsent>();
+  const integration = {
+    name: "ElementCallEmbeddedConsent",
+    setup(client: Client): void {
+      // Sentry emits preprocessEvent before running event processors, which can await.
+      client.on("preprocessEvent", (event, hint) => {
+        if (!hint || hint.data?.__sentry__ === true) return;
+        const type = event.type ?? "event";
+        if (type !== "event" && type !== "transaction") return;
+        const generation = currentConsentGeneration(type);
+        if (generation !== undefined) captured.set(hint, { type, generation });
+      });
+      client.on("beforeSendEvent", (event, hint) => {
+        if (!hint) return;
+        const consent = captured.get(hint);
+        captured.delete(hint);
+        // The SDK keeps this payload object by reference in the event envelope.
+        if (consent) dispatchable.set(event, consent);
+      });
+    },
+  };
+  const transport: typeof makeFetchTransport = (options) => {
+    const delegate = delegateTransport({
       ...options,
       fetchOptions: { ...options.fetchOptions, referrerPolicy: "no-referrer" },
     });
     return {
       send: (envelope) => {
-        const safe = safeEnvelope(envelope, metadata);
+        const safe = safeEnvelope(envelope, metadata, dispatchable);
         return safe
           ? delegate.send(safe)
           : Promise.resolve({ statusCode: 200 });
@@ -41,11 +69,21 @@ export function embeddedSentryTransport(
       flush: (timeout) => delegate.flush(timeout),
     };
   };
+  return { integration, transport };
+}
+
+function currentConsentGeneration(type: string): number | undefined {
+  if (type === "event" && sentryErrorsEnabled())
+    return sentryErrorsGeneration();
+  if (type === "transaction" && sentryPerformanceEnabled())
+    return sentryPerformanceGeneration();
+  return undefined;
 }
 
 function safeEnvelope(
   [header, items]: Envelope,
   metadata: Pick<Event, "environment" | "release">,
+  dispatchable: WeakMap<object, CaptureConsent>,
 ): Envelope | undefined {
   if (
     typeof header.event_id !== "string" ||
@@ -54,11 +92,13 @@ function safeEnvelope(
     return undefined;
   const events: [{ type: "event" | "transaction" }, Event][] = [];
   for (const [item, payload] of items) {
+    if (payload === null || typeof payload !== "object") continue;
+    const consent = dispatchable.get(payload);
+    dispatchable.delete(payload);
     if (
-      ((item.type === "event" && sentryErrorsEnabled()) ||
-        (item.type === "transaction" && sentryPerformanceEnabled())) &&
-      payload !== null &&
-      typeof payload === "object"
+      consent?.type === item.type &&
+      consent.generation === currentConsentGeneration(item.type) &&
+      (payload as Event).event_id === header.event_id
     )
       events.push([
         { type: item.type },
@@ -167,7 +207,7 @@ function safeFrame(frame: StackFrame): StackFrame[] {
 function assetFilename(filename: string | undefined): string | undefined {
   const mapped = rewriteEmbeddedCallFrame({ filename }).filename;
   return mapped?.match(
-    /^(app:\/\/\/element-call\/assets\/[\w.-]+\.js|https?:\/\/[\w.:-]+\/(?:[\w.-]+\/)*assets\/[\w.-]+\.js)(?:[?#].*)?$/,
+    /^((?:app:\/\/\/element-call|https:\/\/appassets\.androidplatform\.net\/element-call)\/assets\/[\w.-]+\.js)(?:[?#].*)?$/,
   )?.[1];
 }
 

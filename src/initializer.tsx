@@ -48,7 +48,7 @@ import {
   rewriteEmbeddedCallFrame,
 } from "./analytics/SentryReporting.ts";
 import { configureCallDiagnostics } from "./analytics/CallDiagnostics.ts";
-import { embeddedSentryTransport } from "./analytics/EmbeddedSentryTransport.ts";
+import { createEmbeddedSentryReporting } from "./analytics/EmbeddedSentryTransport.ts";
 
 // This generates a map of locale names to their URL (based on import.meta.url), which looks like this:
 // {
@@ -322,6 +322,12 @@ export class Initializer {
         environment = Config.get().sentry?.environment;
       }
       if (dsn) {
+        const embeddedReporting = embedded
+          ? createEmbeddedSentryReporting(Sentry.makeFetchTransport, {
+              release,
+              environment,
+            })
+          : undefined;
         configureCallDiagnostics({
           dsn,
           environment,
@@ -334,18 +340,16 @@ export class Initializer {
             dsn,
             environment,
             release,
-            ...(embedded
+            ...(embeddedReporting
               ? {
                   tracePropagationTargets: [],
-                  transport: embeddedSentryTransport(
-                    Sentry.makeFetchTransport,
-                    { release, environment },
-                  ),
+                  transport: embeddedReporting.transport,
                 }
               : {}),
             integrations: [
-              ...(embedded
+              ...(embeddedReporting
                 ? [
+                    embeddedReporting.integration,
                     Sentry.rewriteFramesIntegration({
                       iteratee: rewriteEmbeddedCallFrame,
                     }),

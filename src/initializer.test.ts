@@ -139,6 +139,11 @@ describe("Initializer", async () => {
                 sendDefaultPii: false,
                 tracePropagationTargets: [],
                 transport: expect.any(Function),
+                integrations: expect.arrayContaining([
+                  expect.objectContaining({
+                    name: "ElementCallEmbeddedConsent",
+                  }),
+                ]),
               }),
             );
             const options = sentryInitSpy.mock.calls[0][0];

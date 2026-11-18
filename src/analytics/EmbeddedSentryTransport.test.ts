@@ -12,10 +12,11 @@ import {
   makeFetchTransport,
   Scope,
   type Event,
+  type EventHint,
 } from "@sentry/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { embeddedSentryTransport } from "./EmbeddedSentryTransport";
+import { createEmbeddedSentryReporting } from "./EmbeddedSentryTransport";
 import { setSentryReportingEnabled } from "./SentryReporting";
 
 describe("embedded Sentry requests", () => {
@@ -31,6 +32,12 @@ describe("embedded Sentry requests", () => {
   const asset = "app:///element-call/assets/index-Xyz.js";
   const filename =
     "file:///private/application/Call.bundle/dist/assets/index-Xyz.js";
+  const androidAsset =
+    "https://appassets.androidplatform.net/element-call/assets/index-Android.js";
+  const privateAndroidAsset =
+    "https://appassets.androidplatform.net/private-widget-path/assets/index.js";
+  const privateRemoteAsset =
+    "https://private-widget-host.example/element-call/assets/index.js";
   const debugId = "f89a258e-9ab7-4d31-9864-c941e9fc3402";
   const metadata = { release: "call-test-release", environment: "test" };
 
@@ -71,13 +78,19 @@ describe("embedded Sentry requests", () => {
             values: [
               {
                 type: "TypeError",
-                stacktrace: { frames: [{ filename: asset, lineno: 4 }] },
+                stacktrace: {
+                  frames: [
+                    { filename: asset, lineno: 4 },
+                    { filename: androidAsset, lineno: 8 },
+                  ],
+                },
               },
             ],
           },
           debug_meta: {
             images: [
               { type: "sourcemap", code_file: asset, debug_id: debugId },
+              { type: "sourcemap", code_file: androidAsset, debug_id: debugId },
             ],
           },
         });
@@ -110,21 +123,57 @@ describe("embedded Sentry requests", () => {
         memberId,
         "private-query",
         "private-fragment",
+        "private-widget-path",
+        "private-widget-host",
       ]) {
         expect(String(options?.body)).not.toContain(value);
       }
     },
   );
 
-  it("rechecks crash consent at the transport for an internal SDK error", async () => {
-    setSentryReportingEnabled(false, true);
+  it.each(["event", "transaction"] as const)(
+    "discards a processor-delayed %s after revocation and re-enablement",
+    async (type) => {
+      const errors = type === "event";
+      const performance = type === "transaction";
+      setSentryReportingEnabled(errors, performance);
+      const { client, request } = createClient();
+      const reachedProcessor = Promise.withResolvers<void>();
+      const unblock = Promise.withResolvers<void>();
+      client.addEventProcessor(async (event) => {
+        reachedProcessor.resolve();
+        await unblock.promise;
+        return event;
+      });
+      const event: Event = performance
+        ? { type, timestamp: 1_700_000_002, start_timestamp: 1_700_000_001 }
+        : { message: "ordinary error" };
+
+      client.captureEvent(event, {}, new Scope());
+      await reachedProcessor.promise;
+      setSentryReportingEnabled(false, false);
+      setSentryReportingEnabled(errors, performance);
+      unblock.resolve();
+      expect(await client.flush(1_000)).toBe(true);
+      expect(request).not.toHaveBeenCalled();
+
+      client.captureEvent(event, {}, new Scope());
+      expect(await client.flush(1_000)).toBe(true);
+      expect(request).toHaveBeenCalledOnce();
+    },
+  );
+
+  it("drops the SDK recovery event when a processor throws under crash consent", async () => {
+    setSentryReportingEnabled(true, false);
     const { client, request } = createClient();
-    client.captureEvent(
-      contaminated(),
-      { data: { __sentry__: true } },
-      new Scope(),
-    );
-    await client.flush(1_000);
+    const processor = vi.fn((event: Event, hint: EventHint) => {
+      if (hint.data?.__sentry__ === true) return event;
+      throw new Error("event processor failed");
+    });
+    client.addEventProcessor(processor);
+    client.captureEvent({ message: "ordinary error" }, {}, new Scope());
+    expect(await client.flush(1_000)).toBe(true);
+    expect(processor).toHaveBeenCalledTimes(2);
     expect(request).not.toHaveBeenCalled();
   });
 
@@ -145,16 +194,17 @@ describe("embedded Sentry requests", () => {
     const request = vi
       .fn<typeof globalThis.fetch>()
       .mockResolvedValue(new Response("", { status: 200 }));
+    const reporting = createEmbeddedSentryReporting(
+      (options) => makeFetchTransport(options, request),
+      { ...metadata, environment },
+    );
     const client = new BrowserClient({
       ...metadata,
       environment,
       dsn: "https://public@example.org/42",
       stackParser: defaultStackParser,
-      integrations: [httpContextIntegration()],
-      transport: embeddedSentryTransport(
-        (options) => makeFetchTransport(options, request),
-        { ...metadata, environment },
-      ),
+      integrations: [reporting.integration, httpContextIntegration()],
+      transport: reporting.transport,
       sendClientReports: false,
     });
     client.init();
@@ -186,13 +236,25 @@ describe("embedded Sentry requests", () => {
               frames: [
                 { filename: widgetUrl, lineno: 1 },
                 { filename: `${filename}?query=private-query`, lineno: 4 },
+                { filename: `${androidAsset}#private-fragment`, lineno: 8 },
+                { filename: privateAndroidAsset, lineno: 12 },
+                { filename: privateRemoteAsset, lineno: 16 },
               ],
             },
           },
         ],
       },
       debug_meta: {
-        images: [{ type: "sourcemap", code_file: filename, debug_id: debugId }],
+        images: [
+          filename,
+          androidAsset,
+          privateAndroidAsset,
+          privateRemoteAsset,
+        ].map((code_file) => ({
+          type: "sourcemap",
+          code_file,
+          debug_id: debugId,
+        })),
       },
       contexts: {
         call: { roomId, userId, memberId, url: widgetUrl },
