@@ -108,9 +108,8 @@ describe("native host reporting controls", () => {
           acknowledgement.resolve();
           await Promise.resolve();
         } else {
-          const rejected = expect(ready).rejects.toThrow("Widget reply failed");
           acknowledgement.reject(new Error("Widget reply failed"));
-          await rejected;
+          await expect(ready).rejects.toThrow("Widget reply failed");
         }
 
         expect(callReady).toHaveBeenCalledOnce();
