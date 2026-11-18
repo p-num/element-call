@@ -60,7 +60,7 @@ export function createEmbeddedSentryReporting(
       fetchOptions: { ...options.fetchOptions, referrerPolicy: "no-referrer" },
     });
     return {
-      send: (envelope) => {
+      send: async (envelope) => {
         const safe = safeEnvelope(envelope, metadata, dispatchable);
         return safe
           ? delegate.send(safe)

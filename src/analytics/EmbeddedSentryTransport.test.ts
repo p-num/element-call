@@ -62,7 +62,8 @@ describe("embedded Sentry requests", () => {
 
       expect(request).toHaveBeenCalledOnce();
       const [, options] = request.mock.calls[0];
-      const [header, item, event] = String(options?.body)
+      const body = serializedEnvelope(options?.body);
+      const [header, item, event] = body
         .split("\n")
         .map((line) => JSON.parse(line));
       expect(options?.referrerPolicy).toBe("no-referrer");
@@ -126,7 +127,7 @@ describe("embedded Sentry requests", () => {
         "private-widget-path",
         "private-widget-host",
       ]) {
-        expect(String(options?.body)).not.toContain(value);
+        expect(body).not.toContain(value);
       }
     },
   );
@@ -183,12 +184,18 @@ describe("embedded Sentry requests", () => {
     client.captureEvent({ message: "ordinary error" }, {}, new Scope());
     await client.flush(1_000);
     expect(request).toHaveBeenCalledOnce();
-    const body = String(request.mock.calls[0][1]?.body);
+    const body = serializedEnvelope(request.mock.calls[0][1]?.body);
     expect(JSON.parse(body.split("\n")[2])).toMatchObject({
       environment: "production",
     });
     expect(body).not.toContain(widgetUrl);
   });
+
+  function serializedEnvelope(body: RequestInit["body"]): string {
+    if (typeof body !== "string")
+      throw new TypeError("Expected a serialized Sentry envelope");
+    return body;
+  }
 
   function createClient(environment = metadata.environment) {
     const request = vi

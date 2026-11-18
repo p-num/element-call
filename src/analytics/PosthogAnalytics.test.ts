@@ -483,7 +483,7 @@ describe("identifying the user", () => {
       $process_person_profile: false,
       ...scopedCore,
     };
-    expect(send.mock.calls.map(([body]) => JSON.parse(String(body)))).toEqual([
+    expect(send.mock.calls.map(([body]) => parsePosthogBody(body))).toEqual([
       {
         api_key: credentials.apiKey,
         sent_at: expect.any(String),
@@ -592,7 +592,7 @@ describe("identifying the user", () => {
 
     await Promise.resolve();
     expect(send).toHaveBeenCalledOnce();
-    expect(JSON.parse(String(send.mock.calls[0][0]))).toEqual({
+    expect(parsePosthogBody(send.mock.calls[0][0])).toEqual({
       api_key: credentials.apiKey,
       sent_at: expect.any(String),
       batch: [
@@ -646,8 +646,7 @@ describe("identifying the user", () => {
         };
         expect(
           send.mock.calls.map(
-            ([body]) =>
-              JSON.parse(String(body)).batch[0].properties.distinct_id,
+            ([body]) => parsePosthogBody(body).batch[0].properties.distinct_id,
           ),
         ).toEqual(expectedIds[transition]);
       } finally {
@@ -940,5 +939,11 @@ describe("identifying the user", () => {
         this.dispatchEvent(new Event("readystatechange"));
       });
     return { init, send };
+  }
+
+  function parsePosthogBody(body: Parameters<XMLHttpRequest["send"]>[0]) {
+    if (typeof body !== "string")
+      throw new TypeError("Expected a JSON PostHog request body");
+    return JSON.parse(body);
   }
 });
