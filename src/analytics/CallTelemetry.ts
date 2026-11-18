@@ -195,8 +195,8 @@ export class CallTelemetry {
         outcome: "abandoned",
         ...(reason === "left" ? {} : { endReason: reason }),
       });
-      if (reason === "unanswered") this.lifecycle("timedOut", reason);
     }
+    if (reason === "unanswered") this.lifecycle("timedOut", reason);
     this.finish(reason, reason);
   }
 

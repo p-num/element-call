@@ -188,6 +188,33 @@ describe("call telemetry attempt", () => {
     ]);
   });
 
+  it("reports unanswered ringing once after local media connects", () => {
+    const { call, events, advance, failure } = fixture();
+    call.connection(true);
+    call.ringing();
+    advance(90_000);
+    call.end("unanswered");
+    call.end("unanswered");
+    expect(phases(events)).toEqual([
+      "initiation",
+      "connected",
+      "ringing",
+      "timedOut",
+      "terminated",
+    ]);
+    expect(events.find((event) => event.phase === "timedOut")).toMatchObject({
+      reason: "unanswered",
+      elapsedMs: 90_000,
+    });
+    expect(
+      events.filter((event) => event.eventName === "CallJoinOutcome"),
+    ).toMatchObject([{ outcome: "connected" }]);
+    expect(
+      events.filter((event) => event.eventName === "CallParticipationEnded"),
+    ).toMatchObject([{ endReason: "unanswered", durationMs: 90_000 }]);
+    expect(failure).not.toHaveBeenCalled();
+  });
+
   it("deduplicates disconnections and reconnections, then emits one connected participation end", () => {
     const { call, events, advance } = fixture();
     call.connection(false);
