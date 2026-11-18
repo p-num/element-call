@@ -7,8 +7,10 @@ Please see LICENSE in the repository root for full details.
 
 import { Subject } from "rxjs";
 import { logger } from "matrix-js-sdk/lib/logger";
+import { setSentryReportingEnabled } from "./analytics/SentryReporting.ts";
 
 export interface Controls {
+  setSentryReportingEnabled(errors: boolean, performance: boolean): void;
   canEnterPip(): boolean;
   enablePip(): void;
   disablePip(): void;
@@ -103,6 +105,7 @@ export const setPlaybackStarted = (): void => {
 };
 
 window.controls = {
+  setSentryReportingEnabled,
   canEnterPip(): boolean {
     return setPipEnabled$.observed;
   },

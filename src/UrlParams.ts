@@ -147,6 +147,8 @@ export interface UrlProperties {
    * The Sentry environment. This is only used in the embedded package of Element Call.
    */
   sentryEnvironment: string | null;
+  sentryCrashReportingEnabled: boolean;
+  sentryPerformanceReportingEnabled: boolean;
   /**
    * The theme to use for element call.
    * can be "light", "dark", "light-high-contrast" or "dark-high-contrast".
@@ -277,6 +279,8 @@ export const componentProperties: UrlProperties = {
   rageshakeSubmitUrl: null,
   sentryDsn: null,
   sentryEnvironment: null,
+  sentryCrashReportingEnabled: false,
+  sentryPerformanceReportingEnabled: false,
   theme: null,
   // Solid rather than the gradient the standalone app defaults to: the gradient
   // is drawn by a `position: fixed` pseudo-element, which would escape the
@@ -347,6 +351,14 @@ export const computeUrlParams = (search = "", hash = ""): UrlParams => {
     rageshakeSubmitUrl: parser.getParam("rageshakeSubmitUrl"),
     sentryDsn: parser.getParam("sentryDsn"),
     sentryEnvironment: parser.getParam("sentryEnvironment"),
+    sentryCrashReportingEnabled: parser.getFlagParam(
+      "sentryCrashReportingEnabled",
+      true,
+    ),
+    sentryPerformanceReportingEnabled: parser.getFlagParam(
+      "sentryPerformanceReportingEnabled",
+      true,
+    ),
     e2eEnabled: parser.getFlagParam("enableE2EE", true),
   };
 

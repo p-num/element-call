@@ -39,6 +39,12 @@ import {
   PosthogAnalytics,
 } from "./analytics/PosthogAnalytics.ts";
 import { i18n, languageOfLocalePath } from "./utils/i18n.ts";
+import {
+  configureSentryReporting,
+  sentryErrorsEnabled,
+  sentryPerformanceEnabled,
+  rewriteEmbeddedCallFrame,
+} from "./analytics/SentryReporting.ts";
 
 // This generates a map of locale names to their URL (based on import.meta.url), which looks like this:
 // {
@@ -284,10 +290,14 @@ export class Initializer {
     ) {
       let dsn: string | undefined;
       let environment: string | undefined;
+      let errors = true;
+      let performance = true;
       if (import.meta.env.VITE_PACKAGE === "embedded") {
         // for the embedded package we always use the values from the URL as the widget host is responsible for analytics configuration
         dsn = getUrlParams().sentryDsn ?? undefined;
         environment = getUrlParams().sentryEnvironment ?? undefined;
+        errors = getUrlParams().sentryCrashReportingEnabled;
+        performance = getUrlParams().sentryPerformanceReportingEnabled;
       }
       if (import.meta.env.VITE_PACKAGE === "full") {
         // in full package it is the server responsible for the analytics
@@ -295,23 +305,41 @@ export class Initializer {
         environment = Config.get().sentry?.environment;
       }
       if (dsn) {
-        Sentry.init({
-          dsn,
-          environment,
-          integrations: [
-            Sentry.reactRouterV7BrowserTracingIntegration({
-              useEffect: React.useEffect,
-              useLocation,
-              useNavigationType,
-              createRoutesFromChildren,
-              matchRoutes,
-            }),
-          ],
-          tracesSampleRate: 1.0,
-        });
+        configureSentryReporting(errors, performance, () =>
+          Sentry.init({
+            dsn,
+            environment,
+            release: import.meta.env.VITE_APP_VERSION,
+            integrations: [
+              ...(import.meta.env.VITE_PACKAGE === "embedded"
+                ? [
+                    Sentry.rewriteFramesIntegration({
+                      iteratee: rewriteEmbeddedCallFrame,
+                    }),
+                  ]
+                : []),
+              Sentry.reactRouterV7BrowserTracingIntegration({
+                useEffect: React.useEffect,
+                useLocation,
+                useNavigationType,
+                createRoutesFromChildren,
+                matchRoutes,
+              }),
+            ],
+            sampleRate: 1.0,
+            tracesSampler: (context) =>
+              sentryPerformanceEnabled() && context.parentSampled !== false
+                ? 1.0
+                : 0.0,
+            autoSessionTracking: import.meta.env.VITE_PACKAGE !== "embedded",
+            sendDefaultPii: false,
+            beforeSend: (event) => (sentryErrorsEnabled() ? event : null),
+            beforeSendTransaction: (event) =>
+              sentryPerformanceEnabled() ? event : null,
+          }),
+        );
       }
-      // Sentry is now 'loadeed' (even if we actually skipped starting
-      // it due to to not being configured)
+      // Missing configuration or disabled reporting still completes startup.
       this.loadStates.sentry = LoadState.Loaded;
     }
 
