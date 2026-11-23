@@ -154,8 +154,12 @@ export class MuteState<Label, Selected> {
         return;
       }
       this.pending = undefined;
-      this.needsRepair ||= uncertainEnable;
-      if (this.controls && result !== undefined) this.enabled.next(result);
+      if (target !== this.target) {
+        this.needsRepair ||=
+          uncertainEnable || (result !== undefined && result !== this.target);
+      } else if (this.controls && result !== undefined) {
+        this.enabled.next(result);
+      }
       if (this.needsRepair || target !== this.target) this.reconcile();
       if (!this.pending) this.syncing.next(false);
     };
