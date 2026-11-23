@@ -100,6 +100,45 @@ it("retains the disabled layer's negotiated sentinel and its nominal restoration
   expect(track.encodings[0].maxBitrate).toBeGreaterThan(1);
 });
 
+it.each(["primary", "backup"])(
+  "restores an enabled %s layer from the latest acknowledged refresh",
+  async (target) => {
+    vi.stubGlobal("navigator", {
+      userAgent: "Mozilla/5.0 Gecko/20100101 Firefox/147.0",
+    });
+    const { track, primary, swap } = await publishedCamera();
+    track.codec = "vp8";
+    const backup = sender(layers(3));
+    track.addSimulcastTrack("h264", backup.getParameters().encodings).sender =
+      backup;
+    const selected = target === "primary" ? primary : backup;
+    selected.encodings.at(-1).active = false;
+    await swap(large);
+    const accepted = Promise.withResolvers();
+    const writing = Promise.withResolvers();
+    const write = selected.setParameters.getMockImplementation().bind(selected);
+    selected.setParameters.mockImplementationOnce(async (params) => {
+      writing.resolve();
+      await accepted.promise;
+      await write(params);
+    });
+    const swapped = swap({ width: 1920, height: 1080 });
+    await writing.promise;
+    const qualities = [{ quality: VideoQuality.HIGH, enabled: true }];
+    const enabled =
+      target === "primary"
+        ? track.setPublishingLayers(false, qualities)
+        : track.setPublishingCodecs([{ codec: "h264", qualities }]);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    accepted.resolve();
+    await Promise.all([swapped, enabled]);
+    expect(selected.encodings.at(-1)).toMatchObject({
+      active: true,
+      maxBitrate: 3_000_000,
+    });
+  },
+);
+
 async function publishedCamera() {
   const track = new LocalVideoTrack(new Capture("video", large), {}, false);
   tracks.push(track);
