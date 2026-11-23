@@ -30,7 +30,7 @@ export class MuteState<Label, Selected> {
   private desired: boolean;
   private controls?: object;
   private ended = false;
-  private pending?: object;
+  private pending?: { readonly target: boolean };
   private needsRepair = false;
 
   private readonly enabled = new BehaviorSubject(false);
@@ -101,6 +101,10 @@ export class MuteState<Label, Selected> {
     });
   }
 
+  public get allowsEnabledTrack(): boolean {
+    return !!this.controls && (this.pending?.target ?? this.enabled.value);
+  }
+
   public setHandler(handler: Handler): void {
     if (this.handler.apply !== defaultHandler)
       throw new Error("Multiple mute state handlers are not supported");
@@ -134,7 +138,7 @@ export class MuteState<Label, Selected> {
   }
 
   private apply(target: boolean): void {
-    const request = {};
+    const request = { target };
     const handler = this.handler;
     this.pending = request;
     this.needsRepair = false;
