@@ -16,10 +16,7 @@ import {
 } from "@sentry/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import {
-  createEmbeddedSentryReporting,
-  iosSentryDiagnosticRequest,
-} from "./EmbeddedSentryTransport";
+import { createEmbeddedSentryReporting } from "./EmbeddedSentryTransport";
 import { setSentryReportingEnabled } from "./SentryReporting";
 
 describe("embedded Sentry requests", () => {
@@ -44,11 +41,7 @@ describe("embedded Sentry requests", () => {
   const debugId = "f89a258e-9ab7-4d31-9864-c941e9fc3402";
   const metadata = { release: "call-test-release", environment: "test" };
 
-  afterEach(() => {
-    setSentryReportingEnabled(false, false);
-    vi.unstubAllGlobals();
-    vi.unstubAllEnvs();
-  });
+  afterEach(() => setSentryReportingEnabled(false, false));
 
   it.each(["event", "transaction"] as const)(
     "removes private widget data from the serialized %s",
@@ -198,180 +191,6 @@ describe("embedded Sentry requests", () => {
     expect(body).not.toContain(widgetUrl);
   });
 
-  it("adds one iOS diagnostic attachment to the original error envelope", async () => {
-    setSentryReportingEnabled(true, false);
-    const diagnostics = JSON.stringify({ schema: 1, entries: ["joined ✓"] });
-    const sentryAttachment = vi.fn().mockResolvedValue(diagnostics);
-    vi.stubGlobal("__letroCallAudioDiagnostics", { sentryAttachment });
-    const { client, request } = createClient();
-    const id = client.captureEvent(
-      contaminated(),
-      { attachments: [{ filename: "unsanitized", data: roomId }] },
-      new Scope(),
-    );
-    expect(await client.flush(1_000)).toBe(true);
-    expect(request).toHaveBeenCalledOnce();
-    const body = serializedEnvelope(request.mock.calls[0][1]?.body);
-    const [header, item, event, attachment, contents] = body.split("\n");
-    expect(JSON.parse(header).event_id).toBe(id);
-    expect(JSON.parse(item)).toEqual({ type: "event" });
-    expect(JSON.parse(event).event_id).toBe(id);
-    expect(sentryAttachment).toHaveBeenCalledExactlyOnceWith(
-      id,
-      expect.any(Number),
-    );
-    expect(JSON.parse(attachment)).toMatchObject({
-      type: "attachment",
-      filename: "letro-diagnostics.json",
-      content_type: "application/json",
-      length: new TextEncoder().encode(diagnostics).byteLength,
-    });
-    expect(contents).toBe(diagnostics);
-    expect(body).not.toContain("unsanitized");
-    expect(body).not.toContain(roomId);
-  });
-
-  it("does not send an error if crash consent changes during the iOS reply", async () => {
-    setSentryReportingEnabled(true, true);
-    const reachedBridge = Promise.withResolvers<void>();
-    const diagnostic = Promise.withResolvers<string>();
-    vi.stubGlobal("__letroCallAudioDiagnostics", {
-      sentryAttachment: async () => {
-        reachedBridge.resolve();
-        return diagnostic.promise;
-      },
-    });
-    const { client, request } = createClient();
-    client.captureEvent(
-      { message: "first generation", level: "error" },
-      {},
-      new Scope(),
-    );
-    await reachedBridge.promise;
-    setSentryReportingEnabled(false, true);
-    setSentryReportingEnabled(true, true);
-    diagnostic.resolve('{"schema":1,"entries":["old diagnostic"]}');
-    expect(await client.flush(1_000)).toBe(true);
-    expect(request).not.toHaveBeenCalled();
-  });
-
-  it.each([
-    "reject",
-    "malformed",
-    "untrusted-shape",
-    "oversize",
-    "timeout",
-  ] as const)(
-    "sends the original error when the iOS attachment is a %s",
-    async (failure) => {
-      setSentryReportingEnabled(true, false);
-      const sentryAttachment = vi.fn(async () => {
-        switch (failure) {
-          case "reject":
-            throw new Error("Bridge rejected the request");
-          case "malformed":
-            return "invalid attachment";
-          case "untrusted-shape":
-            return '{"token":"private"}';
-          case "oversize":
-            return "x".repeat(32_769);
-          case "timeout":
-            return new Promise<null>(() => {});
-        }
-      });
-      vi.stubGlobal("__letroCallAudioDiagnostics", { sentryAttachment });
-      const { client, request } = createClient();
-      const id = client.captureEvent(
-        { message: "send me", level: "error" },
-        {},
-        new Scope(),
-      );
-      expect(await client.flush(1_000)).toBe(true);
-      expect(sentryAttachment).toHaveBeenCalledOnce();
-      expect(request).toHaveBeenCalledOnce();
-      const lines = serializedEnvelope(request.mock.calls[0][1]?.body)
-        .split("\n")
-        .map((line) => JSON.parse(line));
-      expect(lines).toHaveLength(3);
-      expect(lines[0].event_id).toBe(id);
-    },
-  );
-
-  it("ignores a mutable hook even when compiled for iOS", () => {
-    vi.stubEnv("VITE_IOS_SENTRY_ATTACHMENTS", "true");
-    vi.stubGlobal("__letroCallAudioDiagnostics", {
-      sentryAttachment: vi.fn(),
-    });
-    expect(iosSentryDiagnosticRequest()).toBeUndefined();
-  });
-
-  it("does not invoke an accessor posing as the iOS hook", () => {
-    vi.stubEnv("VITE_IOS_SENTRY_ATTACHMENTS", "true");
-    const read = vi.fn(() => {
-      throw new Error("Not a native data property");
-    });
-    Object.defineProperty(window, "__letroCallAudioDiagnostics", {
-      configurable: true,
-      get: read,
-    });
-    try {
-      expect(iosSentryDiagnosticRequest()).toBeUndefined();
-      expect(read).not.toHaveBeenCalled();
-    } finally {
-      Reflect.deleteProperty(window, "__letroCallAudioDiagnostics");
-    }
-  });
-
-  it("keeps the iOS bridge out of the performance path", async () => {
-    setSentryReportingEnabled(true, true);
-    const sentryAttachment = vi.fn();
-    vi.stubGlobal("__letroCallAudioDiagnostics", { sentryAttachment });
-    const { client, request } = createClient();
-    client.captureEvent(
-      {
-        type: "transaction",
-        start_timestamp: 1_700_000_001,
-        timestamp: 1_700_000_002,
-      },
-      {},
-      new Scope(),
-    );
-    expect(await client.flush(1_000)).toBe(true);
-    expect(request).toHaveBeenCalledOnce();
-    expect(sentryAttachment).not.toHaveBeenCalled();
-  });
-
-  it("never transmits diagnostics when Sentry rate-limits only the error", async () => {
-    setSentryReportingEnabled(true, false);
-    const sentryAttachment = vi
-      .fn()
-      .mockResolvedValue('{"schema":1,"entries":[{"source":"callWeb"}]}');
-    vi.stubGlobal("__letroCallAudioDiagnostics", { sentryAttachment });
-    const { client, request } = createClient();
-    request.mockResolvedValueOnce(
-      new Response(null, {
-        status: 200,
-        headers: { "X-Sentry-Rate-Limits": "60:error:organization" },
-      }),
-    );
-
-    client.captureEvent(
-      { level: "error", message: "first error" },
-      {},
-      new Scope(),
-    );
-    expect(await client.flush(1_000)).toBe(true);
-    client.captureEvent(
-      { level: "error", message: "rate-limited error" },
-      {},
-      new Scope(),
-    );
-    expect(await client.flush(1_000)).toBe(true);
-
-    expect(sentryAttachment).toHaveBeenCalledTimes(2);
-    expect(request).toHaveBeenCalledOnce();
-  });
-
   function serializedEnvelope(body: RequestInit["body"]): string {
     if (typeof body !== "string")
       throw new TypeError("Expected a serialized Sentry envelope");
@@ -382,12 +201,9 @@ describe("embedded Sentry requests", () => {
     const request = vi
       .fn<typeof globalThis.fetch>()
       .mockResolvedValue(new Response("", { status: 200 }));
-    const requestDiagnostics =
-      window.__letroCallAudioDiagnostics?.sentryAttachment;
     const reporting = createEmbeddedSentryReporting(
-      (options, fetch) => makeFetchTransport(options, fetch ?? request),
+      (options) => makeFetchTransport(options, request),
       { ...metadata, environment },
-      requestDiagnostics && { request: requestDiagnostics, fetch: request },
     );
     const client = new BrowserClient({
       ...metadata,
