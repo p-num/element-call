@@ -168,10 +168,35 @@ it("uses the same dimensions for both senders while other camera replacements qu
 it("uses the processed dimensions for a two-layer backup on a larger raw camera", async () => {
   const { track, primary, swap } = await publishedCamera();
   vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue();
-  const processor = {
+  const processor = resizingProcessor(small);
+  await track.setProcessor(processor);
+  const backup = sender(layers(2));
+  track.addSimulcastTrack("h264", backup.getParameters().encodings);
+  await track.setSimulcastTrackSender("h264", backup);
+  await swap({ width: 1920, height: 1080 });
+  expect(primary.encodings.at(-1).maxBitrate).toBe(3_000_000);
+  expect(backup.encodings.at(-1).maxBitrate).toBe(450_000);
+});
+
+it("restores the raw backup bitrate after removing a resizing processor", async () => {
+  const { track, swap } = await publishedCamera();
+  vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue();
+  const backup = sender(layers(3));
+  track.addSimulcastTrack("h264", backup.getParameters().encodings);
+  await track.setSimulcastTrackSender("h264", backup);
+  await swap({ width: 1920, height: 1080 });
+  expect(backup.encodings.at(-1).maxBitrate).toBe(3_000_000);
+  await track.setProcessor(resizingProcessor(large));
+  expect(backup.encodings.at(-1).maxBitrate).toBe(1_700_000);
+  await track.stopProcessor();
+  expect(backup.encodings.at(-1).maxBitrate).toBe(3_000_000);
+});
+
+function resizingProcessor(dimensions) {
+  return {
     name: "resize",
     async init() {
-      this.processedTrack = new Capture("video", small);
+      this.processedTrack = new Capture("video", dimensions);
       return Promise.resolve();
     },
     async restart() {
@@ -182,14 +207,7 @@ it("uses the processed dimensions for a two-layer backup on a larger raw camera"
       return Promise.resolve();
     },
   };
-  await track.setProcessor(processor);
-  const backup = sender(layers(2));
-  track.addSimulcastTrack("h264", backup.getParameters().encodings);
-  await track.setSimulcastTrackSender("h264", backup);
-  await swap({ width: 1920, height: 1080 });
-  expect(primary.encodings.at(-1).maxBitrate).toBe(3_000_000);
-  expect(backup.encodings.at(-1).maxBitrate).toBe(450_000);
-});
+}
 
 function deferWrite(rtcSender) {
   const started = Promise.withResolvers();
