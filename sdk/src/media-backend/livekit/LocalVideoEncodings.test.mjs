@@ -15,6 +15,7 @@ const tracks = [];
 beforeEach(() => vi.stubGlobal("MediaStream", Stream));
 afterEach(() => {
   tracks.splice(0).forEach((t) => t.stop());
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 
@@ -161,6 +162,30 @@ it("uses the same dimensions for both senders while other camera replacements qu
   await Promise.all([first, second, third]);
   expect(primary.encodings.at(-1).maxBitrate).toBe(3_000_000);
   expect(backup.encodings.at(-1).maxBitrate).toBe(3_000_000);
+});
+
+it("uses the processed dimensions for a two-layer backup on a larger raw camera", async () => {
+  const { track, primary, swap } = await publishedCamera();
+  vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue();
+  const processor = {
+    name: "resize",
+    async init() {
+      this.processedTrack = new Capture("video", small);
+    },
+    async restart() {
+      await this.init();
+    },
+    async destroy() {
+      this.processedTrack.stop();
+    },
+  };
+  await track.setProcessor(processor);
+  const backup = sender(layers(2));
+  track.addSimulcastTrack("h264", backup.getParameters().encodings);
+  await track.setSimulcastTrackSender("h264", backup);
+  await swap({ width: 1920, height: 1080 });
+  expect(primary.encodings.at(-1).maxBitrate).toBe(3_000_000);
+  expect(backup.encodings.at(-1).maxBitrate).toBe(450_000);
 });
 
 function deferWrite(rtcSender) {
