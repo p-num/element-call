@@ -356,6 +356,62 @@ it.each(["hidden", "denied", "mute", "unpublish"])(
   },
 );
 
+it("checks the deadline after waiting for the track change lock", async () => {
+  const fixture = await busyForeground("audio");
+  const unlock = await fixture.track.trackChangeLock.lock();
+  await vi.advanceTimersByTimeAsync(3000);
+  unlock();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(acquire).not.toHaveBeenCalled();
+});
+
+it("rechecks visibility after an asynchronous permission query", async () => {
+  query
+    .mockRejectedValueOnce(new Error("unsupported"))
+    .mockRejectedValueOnce(new Error("unsupported"));
+  const fixture = await busyForeground("audio");
+  const pending = Promise.withResolvers();
+  query.mockReturnValueOnce(pending.promise);
+  await vi.advanceTimersByTimeAsync(1000);
+  visibility = "hidden";
+  pending.resolve(permission);
+  await vi.advanceTimersByTimeAsync(0);
+  expect(acquire).not.toHaveBeenCalled();
+  const next = new Capture("audio");
+  acquire.mockResolvedValue(new Stream([next]));
+  foreground();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(fixture.primary.track).toBe(next);
+});
+
+it("lets an event already using the publication consume the timer", async () => {
+  const fixture = await busyForeground("video");
+  const pending = Promise.withResolvers();
+  acquire.mockReturnValueOnce(pending.promise);
+  foreground();
+  await vi.advanceTimersByTimeAsync(3000);
+  expect(acquire).toHaveBeenCalledOnce();
+  const next = new Capture("video", { width: 640, height: 360 });
+  pending.resolve(new Stream([next]));
+  await vi.advanceTimersByTimeAsync(0);
+  expect(fixture.primary.track).toBe(next);
+});
+
+it("does not schedule a busy-hardware retry for a sender failure", async () => {
+  const fixture = await publishThroughRoom("audio");
+  navigator.userAgent = "AppleWebKit/605 Mobile/26";
+  vi.useFakeTimers();
+  const next = new Capture("audio");
+  acquire.mockResolvedValue(new Stream([next]));
+  fixture.primary.replaceTrack.mockRejectedValue(
+    new DOMException("sender rejected track", "NotReadableError"),
+  );
+  fixture.end();
+  await vi.advanceTimersByTimeAsync(4000);
+  expect(acquire).toHaveBeenCalledOnce();
+  expect(next.readyState).toBe("ended");
+});
+
 it("respects the start deadline after waiting for the fallback microphone list", async () => {
   await busyForeground("audio");
   const devices = Promise.withResolvers();
@@ -368,7 +424,7 @@ it("respects the start deadline after waiting for the fallback microphone list",
 });
 
 it("accepts a timely request that settles after the deadline and preserves caller pause", async () => {
-  const fixture = await busyForeground("audio");
+  const fixture = await busyForeground("audio", "iPad");
   await fixture.track.pauseUpstream();
   const pending = Promise.withResolvers();
   acquire.mockReturnValueOnce(pending.promise);

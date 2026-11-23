@@ -15,6 +15,14 @@ work and sender binding. Stopping, muting, unpublishing or replacing the source
 cancels that work and releases unused media. Foreground interest survives without
 an attached microphone or camera preview.
 
+On Apple mobile devices, a final `NotReadableError` from browser acquisition can
+leave an ended, published microphone or camera waiting for a foreground event
+that never arrives. A visible recovery gets one additional attempt after one
+second. Both the initial and fallback acquisition must start within 2.5 seconds
+of the failure. The SDK rechecks visibility, permission and publication before
+adopting the candidate. A later foreground event can still recover the same
+publication when the delayed attempt was ineligible.
+
 Caller/admission holds and browser capture holds are independent. Replacing capture
 preserves an existing caller hold for primary and backup senders. Initial primary
 publication continues to use the existing admission architecture.
