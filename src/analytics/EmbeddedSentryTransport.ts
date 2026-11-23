@@ -24,16 +24,37 @@ import {
 
 type Transport = ReturnType<typeof makeFetchTransport>;
 type Envelope = Parameters<Transport["send"]>[0];
+type EventEnvelope = Extract<Envelope, [{ event_id: string }, unknown[]]>;
 type Client = NonNullable<ReturnType<typeof getClient>>;
 type EventType = "event" | "transaction";
-type CaptureConsent = { type: EventType; generation: number };
+type CapturedEvent = {
+  type: EventType;
+  generation: number;
+  diagnostics?: DiagnosticAttachment;
+};
+type DiagnosticAttachment = {
+  eventId: string;
+  contents: string;
+  length: number;
+};
+
+declare global {
+  interface Window {
+    __letroCallAudioDiagnostics?: {
+      sentryAttachment?: (
+        eventId: string,
+        timestamp: number,
+      ) => Promise<unknown> | null;
+    };
+  }
+}
 
 export function createEmbeddedSentryReporting(
   delegateTransport: typeof makeFetchTransport,
   metadata: Pick<Event, "environment" | "release">,
 ) {
-  const captured = new WeakMap<EventHint, CaptureConsent>();
-  const dispatchable = new WeakMap<object, CaptureConsent>();
+  const captured = new WeakMap<EventHint, CapturedEvent>();
+  const dispatchable = new WeakMap<object, CapturedEvent>();
   const integration = {
     name: "ElementCallEmbeddedConsent",
     setup(client: Client): void {
@@ -44,6 +65,28 @@ export function createEmbeddedSentryReporting(
         if (type !== "event" && type !== "transaction") return;
         const generation = currentConsentGeneration(type);
         if (generation !== undefined) captured.set(hint, { type, generation });
+      });
+      client.addEventProcessor((event, hint): Event | PromiseLike<Event> => {
+        const capture = captured.get(hint);
+        const bridge = window.__letroCallAudioDiagnostics;
+        const { event_id: eventId, timestamp } = event;
+        if (
+          capture?.type !== "event" ||
+          capture.generation !== currentConsentGeneration("event") ||
+          !bridge?.sentryAttachment ||
+          !isError(event) ||
+          !validEventId(eventId) ||
+          typeof timestamp !== "number" ||
+          !Number.isFinite(timestamp)
+        )
+          return event;
+        // Keep the bridge deadline inside Sentry's event processing so flush waits for it.
+        return readDiagnostics(eventId, async () =>
+          bridge.sentryAttachment?.(eventId, timestamp),
+        ).then((diagnostics) => {
+          capture.diagnostics = diagnostics;
+          return event;
+        });
       });
       client.on("beforeSendEvent", (event, hint) => {
         if (!hint) return;
@@ -83,14 +126,11 @@ function currentConsentGeneration(type: string): number | undefined {
 function safeEnvelope(
   [header, items]: Envelope,
   metadata: Pick<Event, "environment" | "release">,
-  dispatchable: WeakMap<object, CaptureConsent>,
-): Envelope | undefined {
-  if (
-    typeof header.event_id !== "string" ||
-    !/^[0-9a-f]{32}$/i.test(header.event_id)
-  )
-    return undefined;
-  const events: [{ type: "event" | "transaction" }, Event][] = [];
+  dispatchable: WeakMap<object, CapturedEvent>,
+): EventEnvelope | undefined {
+  if (!validEventId(header.event_id)) return undefined;
+  const events: EventEnvelope[1] = [];
+  let diagnostics: DiagnosticAttachment | undefined;
   for (const [item, payload] of items) {
     if (payload === null || typeof payload !== "object") continue;
     const consent = dispatchable.get(payload);
@@ -99,7 +139,7 @@ function safeEnvelope(
       consent?.type === item.type &&
       consent.generation === currentConsentGeneration(item.type) &&
       (payload as Event).event_id === header.event_id
-    )
+    ) {
       events.push([
         { type: item.type },
         safeEvent(payload as Event, {
@@ -109,12 +149,64 @@ function safeEnvelope(
           type: item.type === "transaction" ? "transaction" : undefined,
         }),
       ]);
+      if (
+        item.type === "event" &&
+        consent.diagnostics?.eventId === header.event_id
+      )
+        diagnostics ??= consent.diagnostics;
+    }
   }
   if (events.length === 0) return undefined;
+  if (diagnostics)
+    events.push([
+      {
+        type: "attachment",
+        filename: "letro-diagnostics.json",
+        content_type: "application/json",
+        attachment_type: "event.attachment",
+        length: diagnostics.length,
+      },
+      diagnostics.contents,
+    ]);
   return [
     { event_id: header.event_id, sent_at: new Date().toISOString() },
     events,
   ];
+}
+
+function validEventId(id: unknown): id is string {
+  return typeof id === "string" && /^[0-9a-f]{32}$/i.test(id);
+}
+
+function isError({ level, exception }: Event): boolean {
+  return (
+    level === "error" || level === "fatal" || Boolean(exception?.values?.length)
+  );
+}
+
+async function readDiagnostics(
+  eventId: string,
+  request: () => unknown,
+): Promise<DiagnosticAttachment | undefined> {
+  const limit = 32 * 1024;
+  let deadline: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const result = await Promise.race([
+      request(),
+      new Promise<null>((resolve) => {
+        deadline = setTimeout(() => resolve(null), 250);
+      }),
+    ]);
+    if (typeof result !== "string" || !result.length || result.length > limit)
+      return undefined;
+    JSON.parse(result);
+    const length = new TextEncoder().encode(result).byteLength;
+    return length <= limit ? { eventId, contents: result, length } : undefined;
+  } catch {
+    return undefined;
+  } finally {
+    clearTimeout(deadline);
+  }
 }
 
 function safeEvent(
