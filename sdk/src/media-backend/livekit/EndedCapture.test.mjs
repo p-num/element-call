@@ -47,6 +47,7 @@ afterEach(() => {
     t.detach();
     t.stop();
   });
+  vi.useRealTimers();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
@@ -272,6 +273,147 @@ it("discards a processed camera output produced after unpublish cancels recovery
   expect(rejected.readyState).toBe("ended");
   expect(track.mediaStreamTrack).not.toBe(rejected);
 });
+
+it.each([
+  ["audio", "iPhone"],
+  ["video", "iPhone"],
+  ["audio", "iPad"],
+])(
+  "recovers busy %s on %s after hardware returns without another event",
+  async (kind, platform) => {
+    const fixture = await busyForeground(kind, platform);
+    const next = new Capture(kind, { width: 640, height: 360 });
+    acquire.mockResolvedValue(new Stream([next]));
+    await vi.advanceTimersByTimeAsync(999);
+    expect(acquire).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(acquire).toHaveBeenCalledOnce();
+    expect(fixture.primary.track).toBe(next);
+    expect(
+      fixture.participant.getTrackPublication(fixture.track.source).track,
+    ).toBe(fixture.track);
+    expect(fixture.track.mediaStreamTrack).toBe(next);
+  },
+);
+
+it("spends the single delayed opportunity even if hardware stays busy", async () => {
+  await busyForeground("video");
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(acquire).toHaveBeenCalledOnce();
+  foreground();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(acquire).toHaveBeenCalledTimes(2);
+  await vi.advanceTimersByTimeAsync(10000);
+  expect(acquire).toHaveBeenCalledTimes(2);
+});
+
+it.each([
+  "hidden",
+  "prompt",
+  "denied",
+  "mute",
+  "stop",
+  "unpublish",
+  "replace",
+  "sender",
+  "closed",
+])("skips the delayed acquisition after %s", async (reason) => {
+  const fixture = await busyForeground("audio");
+  if (reason === "hidden") visibility = "hidden";
+  else if (reason === "prompt" || reason === "denied")
+    permission.state = reason;
+  else if (reason === "sender") fixture.track.sender = sender();
+  else if (reason === "closed") fixture.primary.transport = { state: "closed" };
+  else await cancel(fixture, reason);
+  await vi.advanceTimersByTimeAsync(3000);
+  expect(acquire).not.toHaveBeenCalled();
+});
+
+it.each(["hidden", "denied", "mute", "unpublish"])(
+  "disposes the timed candidate after %s",
+  async (reason) => {
+    const fixture = await busyForeground("audio");
+    const pending = Promise.withResolvers();
+    acquire.mockImplementationOnce(() => pending.promise);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(acquire).toHaveBeenCalledOnce();
+    if (reason === "hidden") visibility = "hidden";
+    else if (reason === "denied") permission.state = reason;
+    else await cancel(fixture, reason);
+    const candidate = new Capture("audio");
+    pending.resolve(new Stream([candidate]));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(candidate.readyState).toBe("ended");
+    expect(fixture.primary.replaceTrack).not.toHaveBeenCalledWith(candidate);
+    if (reason === "hidden" || reason === "denied") {
+      const next = new Capture("audio");
+      acquire.mockResolvedValue(new Stream([next]));
+      permission.state = "granted";
+      foreground();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fixture.primary.track).toBe(next);
+    }
+  },
+);
+
+it("respects the start deadline after waiting for the fallback microphone list", async () => {
+  await busyForeground("audio");
+  const devices = Promise.withResolvers();
+  enumerate.mockImplementationOnce(() => devices.promise);
+  await vi.advanceTimersByTimeAsync(3000);
+  expect(acquire).toHaveBeenCalledOnce();
+  devices.resolve([{ kind: "audioinput", deviceId: "late" }]);
+  await vi.advanceTimersByTimeAsync(0);
+  expect(acquire).toHaveBeenCalledOnce();
+});
+
+it("accepts a timely request that settles after the deadline and preserves caller pause", async () => {
+  const fixture = await busyForeground("audio");
+  await fixture.track.pauseUpstream();
+  const pending = Promise.withResolvers();
+  acquire.mockReturnValueOnce(pending.promise);
+  await vi.advanceTimersByTimeAsync(4000);
+  const next = new Capture("audio");
+  pending.resolve(new Stream([next]));
+  await vi.advanceTimersByTimeAsync(0);
+  expect(fixture.track.mediaStreamTrack).toBe(next);
+  expect(fixture.primary.track).toBeNull();
+  await fixture.track.resumeUpstream();
+  expect(fixture.primary.track).toBe(next);
+});
+
+it.each(["NotAllowedError", "AbortError", "NotFoundError"])(
+  "does not retry a final %s",
+  async (name) => {
+    await busyForeground("audio", "iPhone", name);
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(acquire).not.toHaveBeenCalled();
+  },
+);
+
+async function busyForeground(
+  kind,
+  platform = "iPhone",
+  errorName = "NotReadableError",
+) {
+  const fixture = await publishThroughRoom(kind);
+  navigator.userAgent =
+    platform === "iPad"
+      ? "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15) AppleWebKit/605.1.15 Version/26.0 Safari/605.1.15"
+      : "Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/23A";
+  navigator.maxTouchPoints = 5;
+  vi.useFakeTimers();
+  visibility = "hidden";
+  acquire.mockRejectedValue(new DOMException("busy", errorName));
+  fixture.end();
+  await vi.advanceTimersByTimeAsync(0);
+  acquire.mockClear();
+  foreground();
+  await vi.advanceTimersByTimeAsync(0);
+  expect(acquire).toHaveBeenCalled();
+  acquire.mockClear();
+  return fixture;
+}
 
 async function publishThroughRoom(kind) {
   const room = new Room();
