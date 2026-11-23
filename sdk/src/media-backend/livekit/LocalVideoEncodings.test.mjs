@@ -13,8 +13,9 @@ const large = { width: 1280, height: 720 };
 const small = { width: 640, height: 360 };
 const tracks = [];
 beforeEach(() => vi.stubGlobal("MediaStream", Stream));
-afterEach(() => {
+afterEach(async () => {
   tracks.splice(0).forEach((t) => t.stop());
+  await new Promise((resolve) => setTimeout(resolve, 0));
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
