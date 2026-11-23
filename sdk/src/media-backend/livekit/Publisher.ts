@@ -253,8 +253,7 @@ export class Publisher {
   }
 
   private async pauseUpstreams(): Promise<void> {
-    for (const { track } of this.publications())
-      if (track && !track.isUpstreamPaused) await track.pauseUpstream();
+    for (const { track } of this.publications()) await track?.pauseUpstream();
   }
 
   private publications(): LocalTrackPublication[] {
