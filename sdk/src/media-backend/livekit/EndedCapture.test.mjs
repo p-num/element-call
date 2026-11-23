@@ -299,16 +299,13 @@ async function publishThroughRoom(kind) {
       getTransceivers: () => [{ sender: primary, direction: "sendonly" }],
     },
   };
-  engine.addTrack = vi
-    .fn()
-    .mockImplementation(async (request) =>
-      Promise.resolve({
-        ...request,
-        sid: "public-track",
-        codecs: [],
-        audioFeatures: [],
-      }),
-    );
+  engine.addTrack = async (request) =>
+    Promise.resolve({
+      ...request,
+      sid: "public-track",
+      codecs: [],
+      audioFeatures: [],
+    });
   engine.createSender = vi.fn().mockResolvedValue(primary);
   engine.removeTrack = () => {
     primary.track = null;
