@@ -1,0 +1,346 @@
+diff --git a/dist/livekit-client.esm.mjs b/dist/livekit-client.esm.mjs
+index c7cfff9..c59e6a5 100644
+--- a/dist/livekit-client.esm.mjs
++++ b/dist/livekit-client.esm.mjs
+@@ -8730,89 +8730,89 @@ class DefaultReconnectPolicy {
+     return Math.round(retryDelay * (0.5 + Math.random()));
+   }
+-}/******************************************************************************
+-Copyright (c) Microsoft Corporation.
+-
+-Permission to use, copy, modify, and/or distribute this software for any
+-purpose with or without fee is hereby granted.
+-
+-THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH
+-REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY
+-AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT,
+-INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM
+-LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR
+-OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
+-PERFORMANCE OF THIS SOFTWARE.
+-***************************************************************************** */
+-/* global Reflect, Promise, SuppressedError, Symbol, Iterator */
+-
+-
+-function __rest(s, e) {
+-    var t = {};
+-    for (var p in s) if (Object.prototype.hasOwnProperty.call(s, p) && e.indexOf(p) < 0)
+-        t[p] = s[p];
+-    if (s != null && typeof Object.getOwnPropertySymbols === "function")
+-        for (var i = 0, p = Object.getOwnPropertySymbols(s); i < p.length; i++) {
+-            if (e.indexOf(p[i]) < 0 && Object.prototype.propertyIsEnumerable.call(s, p[i]))
+-                t[p[i]] = s[p[i]];
+-        }
+-    return t;
+-}
+-
+-function __awaiter(thisArg, _arguments, P, generator) {
+-    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
+-    return new (P || (P = Promise))(function (resolve, reject) {
+-        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
+-        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
+-        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
+-        step((generator = generator.apply(thisArg, _arguments || [])).next());
+-    });
+-}
+-
+-function __values(o) {
+-    var s = typeof Symbol === "function" && Symbol.iterator, m = s && o[s], i = 0;
+-    if (m) return m.call(o);
+-    if (o && typeof o.length === "number") return {
+-        next: function () {
+-            if (o && i >= o.length) o = void 0;
+-            return { value: o && o[i++], done: !o };
+-        }
+-    };
+-    throw new TypeError(s ? "Object is not iterable." : "Symbol.iterator is not defined.");
+-}
+-
+-function __await(v) {
+-    return this instanceof __await ? (this.v = v, this) : new __await(v);
+-}
+-
+-function __asyncGenerator(thisArg, _arguments, generator) {
+-    if (!Symbol.asyncIterator) throw new TypeError("Symbol.asyncIterator is not defined.");
+-    var g = generator.apply(thisArg, _arguments || []), i, q = [];
+-    return i = Object.create((typeof AsyncIterator === "function" ? AsyncIterator : Object).prototype), verb("next"), verb("throw"), verb("return", awaitReturn), i[Symbol.asyncIterator] = function () { return this; }, i;
+-    function awaitReturn(f) { return function (v) { return Promise.resolve(v).then(f, reject); }; }
+-    function verb(n, f) { if (g[n]) { i[n] = function (v) { return new Promise(function (a, b) { q.push([n, v, a, b]) > 1 || resume(n, v); }); }; if (f) i[n] = f(i[n]); } }
+-    function resume(n, v) { try { step(g[n](v)); } catch (e) { settle(q[0][3], e); } }
+-    function step(r) { r.value instanceof __await ? Promise.resolve(r.value.v).then(fulfill, reject) : settle(q[0][2], r); }
+-    function fulfill(value) { resume("next", value); }
+-    function reject(value) { resume("throw", value); }
+-    function settle(f, v) { if (f(v), q.shift(), q.length) resume(q[0][0], q[0][1]); }
+-}
+-
+-function __asyncDelegator(o) {
+-    var i, p;
+-    return i = {}, verb("next"), verb("throw", function (e) { throw e; }), verb("return"), i[Symbol.iterator] = function () { return this; }, i;
+-    function verb(n, f) { i[n] = o[n] ? function (v) { return (p = !p) ? { value: __await(o[n](v)), done: false } : f ? f(v) : v; } : f; }
+-}
+-
+-function __asyncValues(o) {
+-    if (!Symbol.asyncIterator) throw new TypeError("Symbol.asyncIterator is not defined.");
+-    var m = o[Symbol.asyncIterator], i;
+-    return m ? m.call(o) : (o = typeof __values === "function" ? __values(o) : o[Symbol.iterator](), i = {}, verb("next"), verb("throw"), verb("return"), i[Symbol.asyncIterator] = function () { return this; }, i);
+-    function verb(n) { i[n] = o[n] && function (v) { return new Promise(function (resolve, reject) { v = o[n](v), settle(resolve, reject, v.done, v.value); }); }; }
+-    function settle(resolve, reject, d, v) { Promise.resolve(v).then(function(v) { resolve({ value: v, done: d }); }, reject); }
+-}
+-
+-typeof SuppressedError === "function" ? SuppressedError : function (error, suppressed, message) {
+-    var e = new Error(message);
+-    return e.name = "SuppressedError", e.error = error, e.suppressed = suppressed, e;
++}/******************************************************************************
++Copyright (c) Microsoft Corporation.
++
++Permission to use, copy, modify, and/or distribute this software for any
++purpose with or without fee is hereby granted.
++
++THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH
++REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY
++AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT,
++INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM
++LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR
++OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
++PERFORMANCE OF THIS SOFTWARE.
++***************************************************************************** */
++/* global Reflect, Promise, SuppressedError, Symbol, Iterator */
++
++
++function __rest(s, e) {
++    var t = {};
++    for (var p in s) if (Object.prototype.hasOwnProperty.call(s, p) && e.indexOf(p) < 0)
++        t[p] = s[p];
++    if (s != null && typeof Object.getOwnPropertySymbols === "function")
++        for (var i = 0, p = Object.getOwnPropertySymbols(s); i < p.length; i++) {
++            if (e.indexOf(p[i]) < 0 && Object.prototype.propertyIsEnumerable.call(s, p[i]))
++                t[p[i]] = s[p[i]];
++        }
++    return t;
++}
++
++function __awaiter(thisArg, _arguments, P, generator) {
++    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
++    return new (P || (P = Promise))(function (resolve, reject) {
++        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
++        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
++        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
++        step((generator = generator.apply(thisArg, _arguments || [])).next());
++    });
++}
++
++function __values(o) {
++    var s = typeof Symbol === "function" && Symbol.iterator, m = s && o[s], i = 0;
++    if (m) return m.call(o);
++    if (o && typeof o.length === "number") return {
++        next: function () {
++            if (o && i >= o.length) o = void 0;
++            return { value: o && o[i++], done: !o };
++        }
++    };
++    throw new TypeError(s ? "Object is not iterable." : "Symbol.iterator is not defined.");
++}
++
++function __await(v) {
++    return this instanceof __await ? (this.v = v, this) : new __await(v);
++}
++
++function __asyncGenerator(thisArg, _arguments, generator) {
++    if (!Symbol.asyncIterator) throw new TypeError("Symbol.asyncIterator is not defined.");
++    var g = generator.apply(thisArg, _arguments || []), i, q = [];
++    return i = Object.create((typeof AsyncIterator === "function" ? AsyncIterator : Object).prototype), verb("next"), verb("throw"), verb("return", awaitReturn), i[Symbol.asyncIterator] = function () { return this; }, i;
++    function awaitReturn(f) { return function (v) { return Promise.resolve(v).then(f, reject); }; }
++    function verb(n, f) { if (g[n]) { i[n] = function (v) { return new Promise(function (a, b) { q.push([n, v, a, b]) > 1 || resume(n, v); }); }; if (f) i[n] = f(i[n]); } }
++    function resume(n, v) { try { step(g[n](v)); } catch (e) { settle(q[0][3], e); } }
++    function step(r) { r.value instanceof __await ? Promise.resolve(r.value.v).then(fulfill, reject) : settle(q[0][2], r); }
++    function fulfill(value) { resume("next", value); }
++    function reject(value) { resume("throw", value); }
++    function settle(f, v) { if (f(v), q.shift(), q.length) resume(q[0][0], q[0][1]); }
++}
++
++function __asyncDelegator(o) {
++    var i, p;
++    return i = {}, verb("next"), verb("throw", function (e) { throw e; }), verb("return"), i[Symbol.iterator] = function () { return this; }, i;
++    function verb(n, f) { i[n] = o[n] ? function (v) { return (p = !p) ? { value: __await(o[n](v)), done: false } : f ? f(v) : v; } : f; }
++}
++
++function __asyncValues(o) {
++    if (!Symbol.asyncIterator) throw new TypeError("Symbol.asyncIterator is not defined.");
++    var m = o[Symbol.asyncIterator], i;
++    return m ? m.call(o) : (o = typeof __values === "function" ? __values(o) : o[Symbol.iterator](), i = {}, verb("next"), verb("throw"), verb("return"), i[Symbol.asyncIterator] = function () { return this; }, i);
++    function verb(n) { i[n] = o[n] && function (v) { return new Promise(function (resolve, reject) { v = o[n](v), settle(resolve, reject, v.done, v.value); }); }; }
++    function settle(resolve, reject, d, v) { Promise.resolve(v).then(function(v) { resolve({ value: v, done: d }); }, reject); }
++}
++
++typeof SuppressedError === "function" ? SuppressedError : function (error, suppressed, message) {
++    var e = new Error(message);
++    return e.name = "SuppressedError", e.error = error, e.suppressed = suppressed, e;
+ };var events = {exports: {}};var hasRequiredEvents;
+ function requireEvents() {
+@@ -24349,4 +24349,8 @@ class LocalVideoTrack extends LocalTrack {
+   }
+   set sender(sender) {
++    if (this._sender !== sender) {
++      this.senderRevision++;
++      this.lastEncodedDimensions = undefined;
++    }
+     this._sender = sender;
+     if (this.degradationPreference) {
+@@ -24365,4 +24369,5 @@ class LocalVideoTrack extends LocalTrack {
+     super(mediaTrack, Track.Kind.Video, constraints, userProvidedTrack, loggerOptions);
+     /* @internal */
++    this.senderRevision = 0;
+     this.simulcastCodecs = new Map();
+     this.degradationPreference = 'balanced';
+@@ -24697,9 +24702,14 @@ class LocalVideoTrack extends LocalTrack {
+           return;
+         }
++        const primary = this.sender;
++        if (!primary) return;
++        const revision = this.senderRevision;
++        this.lastEncodedDimensions = undefined;
+         const isScreenShare = this.source === Track.Source.ScreenShare;
+         const newEncodings = computeVideoEncodings(isScreenShare, dims.width, dims.height, Object.assign({}, this.publishOptions));
+-        yield this.applyEncodingsToSender(this.sender, newEncodings);
+-        this.encodings = newEncodings;
+-        this.lastEncodedDimensions = dims;
++        let complete = yield this.applyEncodingsToSender(primary, newEncodings);
++        if (complete && this.sender === primary) {
++          this.encodings = newEncodings;
++        }
+         for (const _ref of this.simulcastCodecs) {
+           var _ref2 = _slicedToArray(_ref, 2);
+@@ -24717,6 +24727,14 @@ class LocalVideoTrack extends LocalTrack {
+             continue;
+           }
+-          yield this.applyEncodingsToSender(sc.sender, backupEncodings);
+-          sc.encodings = backupEncodings;
++          const backup = sc.sender;
++          const applied = yield this.applyEncodingsToSender(backup, backupEncodings);
++          if (applied && sc.sender === backup && this.simulcastCodecs.get(codec) === sc) {
++            sc.encodings = backupEncodings;
++          } else {
++            complete = false;
++          }
++        }
++        if (complete && revision === this.senderRevision) {
++          this.lastEncodedDimensions = dims;
+         }
+       } catch (e) {
+@@ -24733,5 +24751,5 @@ class LocalVideoTrack extends LocalTrack {
+       const params = sender.getParameters();
+       if (!params.encodings || params.encodings.length !== encodings.length) {
+-        return;
++        return false;
+       }
+       params.encodings.forEach((existing, idx) => {
+@@ -24760,5 +24778,11 @@ class LocalVideoTrack extends LocalTrack {
+         encodings: params.encodings
+       }));
+-      yield sender.setParameters(params);
++      try {
++          yield sender.setParameters(params);
++          return true;
++        } catch (error) {
++          this.log.warn('failed to apply recomputed encodings', { ...this.logContext, error });
++          return false;
++        }
+     });
+   }
+@@ -24863,4 +24887,6 @@ class LocalVideoTrack extends LocalTrack {
+         return;
+       }
++      this.senderRevision++;
++      this.lastEncodedDimensions = undefined;
+       simulcastCodecInfo.sender = sender;
+       // the backup codec publishes over its own sender, so it needs the same degradation
+@@ -38479,3 +38505,3 @@ const serializers = {
+   raw,
+   custom
+-};export{AudioPresets,BackupCodecPolicy,BaseKeyProvider,CLIENT_PROTOCOL_DATA_STREAM_RPC,CLIENT_PROTOCOL_DATA_STREAM_V2,CLIENT_PROTOCOL_DEFAULT,CheckStatus,Checker,ConnectionCheck,ConnectionError,ConnectionErrorReason,ConnectionQuality,ConnectionState,CriticalTimers,CryptorError,CryptorErrorReason,CryptorEvent,DataPacket_Kind,DataStreamError,DataStreamErrorReason,DataTrackPacket,DefaultReconnectPolicy,DeviceUnsupportedError,DisconnectReason,EncryptionEvent,Encryption_Type,EngineEvent,ExternalE2EEKeyProvider,FrameMetadataManager,KeyHandlerEvent,KeyProviderEvent,LivekitError,LivekitReasonedError,LocalAudioTrack,LocalDataTrack,LocalParticipant,LocalTrack,LocalTrackPublication,LocalTrackRecorder,LocalVideoTrack,LogLevel,LoggerNames,MediaDeviceFailure,_ as Mutex,NegotiationError,PacketTrailerManager,Participant,ParticipantEvent,ParticipantInfo_Kind as ParticipantKind,PublishDataError,PublishTrackError,RemoteAudioTrack,RemoteDataTrack,RemoteParticipant,RemoteTrack,RemoteTrackPublication,RemoteVideoTrack,Room,RoomEvent,RpcError,ScreenSharePresets,SignalReconnectError,SignalRequestError,SimulatedError,SubscriptionError,TokenSource,TokenSourceConfigurable,TokenSourceFixed,Track,TrackEvent,TrackInvalidError,TrackPublication,TrackType,UnexpectedConnectionState,UnsupportedServer,VideoPreset,VideoPresets,VideoPresets43,VideoQuality,areTokenSourceFetchOptionsEqual,asEncryptablePacket,attachToElement,attributeTypings as attributes,audioCodecs,canFailOverToAnotherRegion,clientProtocol,compareVersions,createAudioAnalyser,createE2EEKey,createKeyMaterialFromBuffer,createKeyMaterialFromString,createLocalAudioTrack,createLocalScreenTracks,createLocalTracks,createLocalVideoTrack,decodeTokenPayload,deriveKeys,detachTrack,facingModeFromDeviceLabel,facingModeFromLocalTrack,getBrowser,getEmptyAudioStreamTrack,getEmptyVideoStreamTrack,getLogger,importKey,isAudioCodec,isAudioTrack,isBackupCodec,isBackupVideoCodec,isBrowserSupported,isE2EESupported,isInsertableStreamSupported,isLocalParticipant,isLocalTrack,isRemoteParticipant,isRemoteTrack,isSVCCodec,isScriptTransformSupported,isSerializer,isVideoCodec,isVideoFrame,isVideoTrack,needsRbspUnescaping,parseRbsp,protocolVersion,ratchet,releaseEmptyAudioStreamTrack,serializers,setLogExtension,setLogLevel,supportsAV1,supportsAdaptiveStream,supportsAudioOutputSelection,supportsDynacast,supportsH265,supportsVP9,version,videoCodecs,writeRbsp};//# sourceMappingURL=livekit-client.esm.mjs.map
++};export{AudioPresets,BackupCodecPolicy,BaseKeyProvider,CLIENT_PROTOCOL_DATA_STREAM_RPC,CLIENT_PROTOCOL_DATA_STREAM_V2,CLIENT_PROTOCOL_DEFAULT,CheckStatus,Checker,ConnectionCheck,ConnectionError,ConnectionErrorReason,ConnectionQuality,ConnectionState,CriticalTimers,CryptorError,CryptorErrorReason,CryptorEvent,DataPacket_Kind,DataStreamError,DataStreamErrorReason,DataTrackPacket,DefaultReconnectPolicy,DeviceUnsupportedError,DisconnectReason,EncryptionEvent,Encryption_Type,EngineEvent,ExternalE2EEKeyProvider,FrameMetadataManager,KeyHandlerEvent,KeyProviderEvent,LivekitError,LivekitReasonedError,LocalAudioTrack,LocalDataTrack,LocalParticipant,LocalTrack,LocalTrackPublication,LocalTrackRecorder,LocalVideoTrack,LogLevel,LoggerNames,MediaDeviceFailure,_ as Mutex,NegotiationError,PacketTrailerManager,Participant,ParticipantEvent,ParticipantInfo_Kind as ParticipantKind,PublishDataError,PublishTrackError,RemoteAudioTrack,RemoteDataTrack,RemoteParticipant,RemoteTrack,RemoteTrackPublication,RemoteVideoTrack,Room,RoomEvent,RpcError,ScreenSharePresets,SignalReconnectError,SignalRequestError,SimulatedError,SubscriptionError,TokenSource,TokenSourceConfigurable,TokenSourceFixed,Track,TrackEvent,TrackInvalidError,TrackPublication,TrackType,UnexpectedConnectionState,UnsupportedServer,VideoPreset,VideoPresets,VideoPresets43,VideoQuality,areTokenSourceFetchOptionsEqual,asEncryptablePacket,attachToElement,attributeTypings as attributes,audioCodecs,canFailOverToAnotherRegion,clientProtocol,compareVersions,createAudioAnalyser,createE2EEKey,createKeyMaterialFromBuffer,createKeyMaterialFromString,createLocalAudioTrack,createLocalScreenTracks,createLocalTracks,createLocalVideoTrack,decodeTokenPayload,deriveKeys,detachTrack,facingModeFromDeviceLabel,facingModeFromLocalTrack,getBrowser,getEmptyAudioStreamTrack,getEmptyVideoStreamTrack,getLogger,importKey,isAudioCodec,isAudioTrack,isBackupCodec,isBackupVideoCodec,isBrowserSupported,isE2EESupported,isInsertableStreamSupported,isLocalParticipant,isLocalTrack,isRemoteParticipant,isRemoteTrack,isSVCCodec,isScriptTransformSupported,isSerializer,isVideoCodec,isVideoFrame,isVideoTrack,needsRbspUnescaping,parseRbsp,protocolVersion,ratchet,releaseEmptyAudioStreamTrack,serializers,setLogExtension,setLogLevel,supportsAV1,supportsAdaptiveStream,supportsAudioOutputSelection,supportsDynacast,supportsH265,supportsVP9,version,videoCodecs,writeRbsp};
+diff --git a/src/room/track/LocalVideoTrack.ts b/src/room/track/LocalVideoTrack.ts
+index 65f72f2..7b60dfe 100644
+--- a/src/room/track/LocalVideoTrack.ts
++++ b/src/room/track/LocalVideoTrack.ts
+@@ -73,4 +73,6 @@ export default class LocalVideoTrack extends LocalTrack<Track.Kind.Video> {
+   lastEncodedDimensions?: Track.Dimensions;
+ 
++  private senderRevision = 0;
++
+   get sender(): RTCRtpSender | undefined {
+     return this._sender;
+@@ -78,4 +80,8 @@ export default class LocalVideoTrack extends LocalTrack<Track.Kind.Video> {
+ 
+   set sender(sender: RTCRtpSender | undefined) {
++    if (this._sender !== sender) {
++      this.senderRevision++;
++      this.lastEncodedDimensions = undefined;
++    }
+     this._sender = sender;
+     if (this.degradationPreference) {
+@@ -331,4 +337,8 @@ export default class LocalVideoTrack extends LocalTrack<Track.Kind.Video> {
+       }
+ 
++      const primary = this.sender;
++      if (!primary) return;
++      const revision = this.senderRevision;
++      this.lastEncodedDimensions = undefined;
+       const isScreenShare = this.source === Track.Source.ScreenShare;
+       const newEncodings = computeVideoEncodings(isScreenShare, dims.width, dims.height, {
+@@ -336,7 +346,8 @@ export default class LocalVideoTrack extends LocalTrack<Track.Kind.Video> {
+       });
+ 
+-      await this.applyEncodingsToSender(this.sender, newEncodings);
+-      this.encodings = newEncodings;
+-      this.lastEncodedDimensions = dims;
++      let complete = await this.applyEncodingsToSender(primary, newEncodings);
++      if (complete && this.sender === primary) {
++        this.encodings = newEncodings;
++      }
+ 
+       for (const [codec, sc] of this.simulcastCodecs) {
+@@ -352,6 +363,14 @@ export default class LocalVideoTrack extends LocalTrack<Track.Kind.Video> {
+           continue;
+         }
+-        await this.applyEncodingsToSender(sc.sender, backupEncodings);
+-        sc.encodings = backupEncodings;
++        const backup = sc.sender;
++        const applied = await this.applyEncodingsToSender(backup, backupEncodings);
++        if (applied && sc.sender === backup && this.simulcastCodecs.get(codec) === sc) {
++          sc.encodings = backupEncodings;
++        } else {
++          complete = false;
++        }
++      }
++      if (complete && revision === this.senderRevision) {
++        this.lastEncodedDimensions = dims;
+       }
+     } catch (e) {
+@@ -371,5 +390,5 @@ export default class LocalVideoTrack extends LocalTrack<Track.Kind.Video> {
+     const params = sender.getParameters();
+     if (!params.encodings || params.encodings.length !== encodings.length) {
+-      return;
++      return false;
+     }
+     params.encodings.forEach((existing, idx) => {
+@@ -399,5 +418,11 @@ export default class LocalVideoTrack extends LocalTrack<Track.Kind.Video> {
+       encodings: params.encodings,
+     });
+-    await sender.setParameters(params);
++    try {
++        await sender.setParameters(params);
++        return true;
++      } catch (error) {
++        this.log.warn('failed to apply recomputed encodings', { ...this.logContext, error });
++        return false;
++      }
+   }
+ 
+@@ -481,4 +506,6 @@ export default class LocalVideoTrack extends LocalTrack<Track.Kind.Video> {
+       return;
+     }
++    this.senderRevision++;
++    this.lastEncodedDimensions = undefined;
+     simulcastCodecInfo.sender = sender;
+ 
