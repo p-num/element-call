@@ -10,6 +10,9 @@ import { type Observable, of } from "rxjs";
 
 import { ObservableScope } from "./ObservableScope";
 import { constant } from "./Behavior";
+import { MuteStates } from "./MuteStates";
+import { nullHostBridge } from "../HostBridge";
+import { flushPromises, mockMediaDevices } from "../utils/test";
 import { type SelectedAudioOutputDevice } from "./MediaDevices";
 import {
   availableOutputDevices$,
@@ -144,6 +147,77 @@ describe("Explicit selection", () => {
     // ...until the user explicitly picks the speaker.
     output.select(SPEAKER.id);
     expect(selected()).toEqual({ id: SPEAKER.id, virtualEarpiece: false });
+  });
+
+  it("uses only an available output while remembering the last request", () => {
+    const output = new IOSControlledAudioOutput(
+      constant(false),
+      testScope,
+      "audio",
+    );
+    const selected = latestSelection(output);
+    availableOutputDevices$.next([HEADSET]);
+    output.select(EARPIECE_CONFIG_ID);
+    expect(selected()).toEqual({ id: HEADSET.id, virtualEarpiece: false });
+    availableOutputDevices$.next([SPEAKER]);
+    expect(selected()?.id).toBe(EARPIECE_CONFIG_ID);
+    availableOutputDevices$.next([]);
+    expect(selected()).toBeUndefined();
+    outputDevice$.next(SPEAKER.id);
+    expect(selected()).toBeUndefined();
+    availableOutputDevices$.next([HEADSET]);
+    availableOutputDevices$.next([HEADSET]);
+    availableOutputDevices$.next([SPEAKER]);
+    expect(selected()).toEqual({ id: SPEAKER.id, virtualEarpiece: false });
+    for (const notify of [
+      window.controls.onAudioDeviceSelect,
+      window.controls.onOutputDeviceSelect,
+    ])
+      expect(vi.mocked(notify!).mock.calls.flat()).toEqual([
+        HEADSET.id,
+        EARPIECE_CONFIG_ID,
+        HEADSET.id,
+        SPEAKER.id,
+      ]);
+  });
+
+  it("keeps the camera off as a virtual earpiece disappears and returns", async () => {
+    const output = new IOSControlledAudioOutput(
+      constant(false),
+      testScope,
+      "video",
+    );
+    availableOutputDevices$.next([SPEAKER]);
+    const mediaDevices = mockMediaDevices({
+      audioOutput: output,
+      videoInput: {
+        available$: constant(
+          new Map([["cam", { type: "name", name: "Camera" }]]),
+        ),
+        selected$: constant({ id: "cam" }),
+        select: vi.fn(),
+      },
+    });
+    const mute = new MuteStates(
+      testScope,
+      mediaDevices,
+      { audioEnabled: false, videoEnabled: true },
+      nullHostBridge,
+    );
+    const handler = vi.fn(async (enabled: boolean) => enabled);
+    mute.video.setHandler(handler);
+    mute.video.setEnabled$.value?.(false);
+    await flushPromises();
+    output.select(EARPIECE_CONFIG_ID);
+    availableOutputDevices$.next([HEADSET]);
+    await flushPromises();
+    expect(output.selected$.value?.virtualEarpiece).toBe(false);
+    expect(mute.video.setEnabled$.value).toBeTypeOf("function");
+    availableOutputDevices$.next([SPEAKER]);
+    await flushPromises();
+    expect(output.selected$.value?.virtualEarpiece).toBe(true);
+    expect(mute.video.setEnabled$.value).toBeNull();
+    expect(handler).not.toHaveBeenCalledWith(true);
   });
 
   it("a host selection overrides the earpiece default", () => {
