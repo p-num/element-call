@@ -1,5 +1,5 @@
 diff --git a/dist/livekit-client.esm.mjs b/dist/livekit-client.esm.mjs
-index c7cfff9..75915fa 100644
+index c7cfff9..d83444a 100644
 --- a/dist/livekit-client.esm.mjs
 +++ b/dist/livekit-client.esm.mjs
 @@ -22974,4 +22974,5 @@ class LocalTrack extends Track {
@@ -184,7 +184,7 @@ index c7cfff9..75915fa 100644
 +    this.cancelCaptureRecovery();
      return __awaiter(this, void 0, void 0, function* () {
        const unlock = yield this.trackChangeLock.lock();
-@@ -23278,83 +23289,184 @@ class LocalTrack extends Track {
+@@ -23278,83 +23289,186 @@ class LocalTrack extends Track {
      });
    }
 -  restart(constraints, isUnmuting) {
@@ -295,6 +295,8 @@ index c7cfff9..75915fa 100644
 -        if (this.manuallyStopped) {
 -          this.log.warn('track was stopped during a restart, stopping restarted track', this.logContext);
 -          this.stop();
++        if (recovery && (!recovery.current() || recovery.canStartCapture?.() === false))
++          return;
 +        mediaStream = await navigator.mediaDevices.getUserMedia(streamConstraints);
 +      }
 +      catch (e) {
@@ -442,7 +444,7 @@ index c7cfff9..75915fa 100644
 +    if (muted) this.cancelCaptureRecovery();
      this.log.debug("setting ".concat(this.kind, " track ").concat(muted ? 'muted' : 'unmuted'), this.logContext);
      if (this.isMuted === muted && this._mediaStreamTrack.enabled !== muted) {
-@@ -23368,23 +23480,22 @@ class LocalTrack extends Track {
+@@ -23368,23 +23482,22 @@ class LocalTrack extends Track {
      return this._mediaStreamTrack.readyState !== 'live' || this._mediaStreamTrack.muted || !this._mediaStreamTrack.enabled || this.reacquireTrack;
    }
 -  handleAppVisibilityChanged() {
@@ -481,7 +483,7 @@ index c7cfff9..75915fa 100644
 +    this.debouncedTrackMuteHandler.cancel('stop');
      this.manuallyStopped = true;
      super.stop();
-@@ -23407,51 +23518,46 @@ class LocalTrack extends Track {
+@@ -23407,51 +23520,46 @@ class LocalTrack extends Track {
     * this API is unsupported on Safari < 12 due to a bug
     **/
 -  pauseUpstream() {
@@ -572,14 +574,14 @@ index c7cfff9..75915fa 100644
 +        await sender.replaceTrack(track);
        }
      });
-@@ -23541,5 +23647,5 @@ class LocalTrack extends Track {
+@@ -23541,5 +23649,5 @@ class LocalTrack extends Track {
                }
              }
 -            yield (_a = _this3.sender) === null || _a === void 0 ? void 0 : _a.replaceTrack(_this3.processor.processedTrack);
 +            yield _this3.bindProcessorTrack(_this3.sender, _this3.processor.processedTrack);
            }
            _this3.emit(TrackEvent.TrackProcessorUpdate, _this3.processor);
-@@ -23780,15 +23886,9 @@ class LocalTrack extends Track {
+@@ -23780,15 +23888,9 @@ class LocalTrack extends Track {
      });
    }
 -  restart(constraints, isUnmuting) {
@@ -599,35 +601,35 @@ index c7cfff9..75915fa 100644
 +    return track;
    }
    /* @internal */
-@@ -23858,5 +23958,5 @@ class LocalTrack extends Track {
+@@ -23858,5 +23960,5 @@ class LocalTrack extends Track {
          this.processor = processor;
          if (this.processor.processedTrack) {
 -          yield (_a = this.sender) === null || _a === void 0 ? void 0 : _a.replaceTrack(this.processor.processedTrack);
 +          yield this.bindProcessorTrack(this.sender, this.processor.processedTrack);
            this.observeProcessedTrack(this.processor.processedTrack);
          }
-@@ -23926,5 +24026,5 @@ class LocalTrack extends Track {
+@@ -23926,5 +24028,5 @@ class LocalTrack extends Track {
          });
          if (this.processor.processedTrack) {
 -          yield (_a = this.sender) === null || _a === void 0 ? void 0 : _a.replaceTrack(this.processor.processedTrack);
 +          yield this.bindProcessorTrack(this.sender, this.processor.processedTrack);
            this.observeProcessedTrack(this.processor.processedTrack);
          }
-@@ -24149,5 +24249,5 @@ function computeStartTargetBitrate(codec, options, encodings) {
+@@ -24149,5 +24251,5 @@ function computeStartTargetBitrate(codec, options, encodings) {
    }, 0);
  }
 -function computeTrackBackupEncodings(track, videoCodec, opts) {
 +function computeTrackBackupEncodings(track, videoCodec, opts, dimensions) {
    var _a, _b, _c, _d;
    // backupCodec should not be true anymore, default codec is set in LocalParticipant.publish
-@@ -24165,5 +24265,5 @@ function computeTrackBackupEncodings(track, videoCodec, opts) {
+@@ -24165,5 +24267,5 @@ function computeTrackBackupEncodings(track, videoCodec, opts) {
    // use backup encoding setting as videoEncoding for backup codec publishing
    opts.videoEncoding = opts.backupCodec.encoding;
 -  const settings = track.mediaStreamTrack.getSettings();
 +  const settings = dimensions ?? track.mediaStreamTrack.getSettings();
    const width = (_a = settings.width) !== null && _a !== void 0 ? _a : (_b = track.dimensions) === null || _b === void 0 ? void 0 : _b.width;
    const height = (_c = settings.height) !== null && _c !== void 0 ? _c : (_d = track.dimensions) === null || _d === void 0 ? void 0 : _d.height;
-@@ -24349,5 +24449,9 @@ class LocalVideoTrack extends LocalTrack {
+@@ -24349,5 +24451,9 @@ class LocalVideoTrack extends LocalTrack {
    }
    set sender(sender) {
 -    this._sender = sender;
@@ -638,13 +640,13 @@ index c7cfff9..75915fa 100644
 +    super.sender = sender;
      if (this.degradationPreference) {
        this.setDegradationPreference(this.degradationPreference);
-@@ -24365,4 +24469,5 @@ class LocalVideoTrack extends LocalTrack {
+@@ -24365,4 +24471,5 @@ class LocalVideoTrack extends LocalTrack {
      super(mediaTrack, Track.Kind.Video, constraints, userProvidedTrack, loggerOptions);
      /* @internal */
 +    this.senderRevision = 0;
      this.simulcastCodecs = new Map();
      this.degradationPreference = 'balanced';
-@@ -24437,64 +24542,31 @@ class LocalVideoTrack extends LocalTrack {
+@@ -24437,64 +24544,31 @@ class LocalVideoTrack extends LocalTrack {
      super.stop();
    }
 -  pauseUpstream() {
@@ -697,7 +699,10 @@ index c7cfff9..75915fa 100644
 -    const _super = Object.create(null, {
 -      resumeUpstream: {
 -        get: () => super.resumeUpstream
--      }
++      finally {
++        if (next && sc.mediaStreamTrack !== next && next.readyState !== 'ended')
++          next.stop();
+       }
 -    });
 -    return __awaiter(this, void 0, void 0, function* () {
 -      var _a, e_2, _b, _c;
@@ -720,17 +725,14 @@ index c7cfff9..75915fa 100644
 -        } finally {
 -          if (e_2) throw e_2.error;
 -        }
-+      finally {
-+        if (next && sc.mediaStreamTrack !== next && next.readyState !== 'ended')
-+          next.stop();
-       }
+-      }
 -    });
 +    }
    }
 +  
    mute() {
      const _super = Object.create(null, {
-@@ -24621,48 +24693,18 @@ class LocalVideoTrack extends LocalTrack {
+@@ -24621,48 +24695,18 @@ class LocalVideoTrack extends LocalTrack {
      this.setPublishingLayers(this.isSvcPublish(this.codec), qualities);
    }
 -  restartTrack(options) {
@@ -792,14 +794,14 @@ index c7cfff9..75915fa 100644
 +    await this.onSenderTrackSwapped();
    }
    onSenderTrackSwapped() {
-@@ -24685,4 +24727,6 @@ class LocalVideoTrack extends LocalTrack {
+@@ -24685,4 +24729,6 @@ class LocalVideoTrack extends LocalTrack {
        const unlock = yield this.senderLock.lock();
        try {
 +        const capture = this._mediaStreamTrack;
 +        const output = this.mediaStreamTrack;
          let dims;
          try {
-@@ -24694,12 +24738,19 @@ class LocalVideoTrack extends LocalTrack {
+@@ -24694,12 +24740,19 @@ class LocalVideoTrack extends LocalTrack {
            return;
          }
 -        if (this.lastEncodedDimensions && this.lastEncodedDimensions.width === dims.width && this.lastEncodedDimensions.height === dims.height) {
@@ -823,7 +825,7 @@ index c7cfff9..75915fa 100644
 +        }
          for (const _ref of this.simulcastCodecs) {
            var _ref2 = _slicedToArray(_ref, 2);
-@@ -24713,10 +24764,19 @@ class LocalVideoTrack extends LocalTrack {
+@@ -24713,10 +24766,19 @@ class LocalVideoTrack extends LocalTrack {
            }
            const backupOpts = Object.assign({}, this.publishOptions);
 -          const backupEncodings = computeTrackBackupEncodings(this, codec, backupOpts);
@@ -846,14 +848,14 @@ index c7cfff9..75915fa 100644
 +          this.lastEncodedDimensions = dims;
          }
        } catch (e) {
-@@ -24733,5 +24793,5 @@ class LocalVideoTrack extends LocalTrack {
+@@ -24733,5 +24795,5 @@ class LocalVideoTrack extends LocalTrack {
        const params = sender.getParameters();
        if (!params.encodings || params.encodings.length !== encodings.length) {
 -        return;
 +        return false;
        }
        params.encodings.forEach((existing, idx) => {
-@@ -24760,5 +24820,11 @@ class LocalVideoTrack extends LocalTrack {
+@@ -24760,5 +24822,11 @@ class LocalVideoTrack extends LocalTrack {
          encodings: params.encodings
        }));
 -      yield sender.setParameters(params);
@@ -866,21 +868,21 @@ index c7cfff9..75915fa 100644
 +        }
      });
    }
-@@ -24789,5 +24855,5 @@ class LocalVideoTrack extends LocalTrack {
+@@ -24789,5 +24857,5 @@ class LocalVideoTrack extends LocalTrack {
                _f = false;
                const sc = _c;
 -              yield (_e = sc.sender) === null || _e === void 0 ? void 0 : _e.replaceTrack(_this.processor.processedTrack);
 +              yield _this.bindProcessorTrack(sc.sender, _this.processor.processedTrack);
              }
            } catch (e_4_1) {
-@@ -24863,4 +24929,6 @@ class LocalVideoTrack extends LocalTrack {
+@@ -24863,4 +24931,6 @@ class LocalVideoTrack extends LocalTrack {
          return;
        }
 +      this.senderRevision++;
 +      this.lastEncodedDimensions = undefined;
        simulcastCodecInfo.sender = sender;
        // the backup codec publishes over its own sender, so it needs the same degradation
-@@ -24923,7 +24991,7 @@ class LocalVideoTrack extends LocalTrack {
+@@ -24923,7 +24993,7 @@ class LocalVideoTrack extends LocalTrack {
                  }
                }
 -            } else if (simulcastCodecInfo.encodings) {
@@ -890,7 +892,7 @@ index c7cfff9..75915fa 100644
 +              yield setPublishingLayersForSender(() => this.simulcastCodecs.get(codec.codec), codec.qualities, this.senderLock, this.isSvcPublish(codec.codec), this.log, this.logContext);
              }
            }
-@@ -24958,8 +25026,5 @@ class LocalVideoTrack extends LocalTrack {
+@@ -24958,8 +25028,5 @@ class LocalVideoTrack extends LocalTrack {
          qualities
        }));
 -      if (!this.sender || !this.encodings) {
@@ -900,7 +902,7 @@ index c7cfff9..75915fa 100644
 +      yield setPublishingLayersForSender(() => ({ sender: this.sender, encodings: this.encodings }), qualities, this.senderLock, isSvc, this.log, this.logContext);
      });
    }
-@@ -25017,13 +25082,12 @@ class LocalVideoTrack extends LocalTrack {
+@@ -25017,13 +25084,12 @@ class LocalVideoTrack extends LocalTrack {
    }
  }
 -function setPublishingLayersForSender(sender, senderEncodings, qualities, senderLock, isSVC, log, logContext) {
@@ -919,7 +921,7 @@ index c7cfff9..75915fa 100644
 +      log.debug('setPublishingLayersForSender', { ...logContext, sender, qualities, senderEncodings });
        const params = sender.getParameters();
        const encodings = params.encodings;
-@@ -26077,20 +26141,28 @@ class RTCEngine extends eventsExports.EventEmitter {
+@@ -26077,20 +26143,28 @@ class RTCEngine extends eventsExports.EventEmitter {
      });
    }
 -  createSimulcastSender(track, simulcastTrack, opts, encodings) {
@@ -964,7 +966,7 @@ index c7cfff9..75915fa 100644
 +    return sender;
    }
    get frameMetadataWorker() {
-@@ -26164,21 +26236,20 @@ class RTCEngine extends eventsExports.EventEmitter {
+@@ -26164,21 +26238,20 @@ class RTCEngine extends eventsExports.EventEmitter {
      });
    }
 -  createSimulcastTransceiverSender(track, simulcastTrack, opts, encodings) {
@@ -1001,7 +1003,7 @@ index c7cfff9..75915fa 100644
 +      await track.setSimulcastTrackSender(opts.videoCodec, transceiver.sender);
        return transceiver.sender;
      });
-@@ -32378,50 +32449,44 @@ class Participant extends eventsExports.EventEmitter {
+@@ -32378,50 +32451,44 @@ class Participant extends eventsExports.EventEmitter {
        this.unpublishTrack(track.track);
      };
 -    this.handleTrackEnded = track => __awaiter(this, void 0, void 0, function* () {
@@ -1084,7 +1086,7 @@ index c7cfff9..75915fa 100644
 +    };
      this.audioTrackPublications = new Map();
      this.videoTrackPublications = new Map();
-@@ -33934,29 +33999,15 @@ class Participant extends eventsExports.EventEmitter {
+@@ -33934,29 +34001,15 @@ class Participant extends eventsExports.EventEmitter {
     * @internal
     */
 -  restartOnDefaultAudioDevice(track) {
@@ -1125,7 +1127,7 @@ index c7cfff9..75915fa 100644
 +    }
    }
    getPublicationForTrack(track) {
-@@ -38479,3 +38530,3 @@ const serializers = {
+@@ -38479,3 +38532,3 @@ const serializers = {
    raw,
    custom
 -};export{AudioPresets,BackupCodecPolicy,BaseKeyProvider,CLIENT_PROTOCOL_DATA_STREAM_RPC,CLIENT_PROTOCOL_DATA_STREAM_V2,CLIENT_PROTOCOL_DEFAULT,CheckStatus,Checker,ConnectionCheck,ConnectionError,ConnectionErrorReason,ConnectionQuality,ConnectionState,CriticalTimers,CryptorError,CryptorErrorReason,CryptorEvent,DataPacket_Kind,DataStreamError,DataStreamErrorReason,DataTrackPacket,DefaultReconnectPolicy,DeviceUnsupportedError,DisconnectReason,EncryptionEvent,Encryption_Type,EngineEvent,ExternalE2EEKeyProvider,FrameMetadataManager,KeyHandlerEvent,KeyProviderEvent,LivekitError,LivekitReasonedError,LocalAudioTrack,LocalDataTrack,LocalParticipant,LocalTrack,LocalTrackPublication,LocalTrackRecorder,LocalVideoTrack,LogLevel,LoggerNames,MediaDeviceFailure,_ as Mutex,NegotiationError,PacketTrailerManager,Participant,ParticipantEvent,ParticipantInfo_Kind as ParticipantKind,PublishDataError,PublishTrackError,RemoteAudioTrack,RemoteDataTrack,RemoteParticipant,RemoteTrack,RemoteTrackPublication,RemoteVideoTrack,Room,RoomEvent,RpcError,ScreenSharePresets,SignalReconnectError,SignalRequestError,SimulatedError,SubscriptionError,TokenSource,TokenSourceConfigurable,TokenSourceFixed,Track,TrackEvent,TrackInvalidError,TrackPublication,TrackType,UnexpectedConnectionState,UnsupportedServer,VideoPreset,VideoPresets,VideoPresets43,VideoQuality,areTokenSourceFetchOptionsEqual,asEncryptablePacket,attachToElement,attributeTypings as attributes,audioCodecs,canFailOverToAnotherRegion,clientProtocol,compareVersions,createAudioAnalyser,createE2EEKey,createKeyMaterialFromBuffer,createKeyMaterialFromString,createLocalAudioTrack,createLocalScreenTracks,createLocalTracks,createLocalVideoTrack,decodeTokenPayload,deriveKeys,detachTrack,facingModeFromDeviceLabel,facingModeFromLocalTrack,getBrowser,getEmptyAudioStreamTrack,getEmptyVideoStreamTrack,getLogger,importKey,isAudioCodec,isAudioTrack,isBackupCodec,isBackupVideoCodec,isBrowserSupported,isE2EESupported,isInsertableStreamSupported,isLocalParticipant,isLocalTrack,isRemoteParticipant,isRemoteTrack,isSVCCodec,isScriptTransformSupported,isSerializer,isVideoCodec,isVideoFrame,isVideoTrack,needsRbspUnescaping,parseRbsp,protocolVersion,ratchet,releaseEmptyAudioStreamTrack,serializers,setLogExtension,setLogLevel,supportsAV1,supportsAdaptiveStream,supportsAudioOutputSelection,supportsDynacast,supportsH265,supportsVP9,version,videoCodecs,writeRbsp};//# sourceMappingURL=livekit-client.esm.mjs.map
@@ -1344,7 +1346,7 @@ index 0b4bd5b..a02ca1b 100644
          this.observeProcessedTrack(this.processor.processedTrack);
        }
 diff --git a/src/room/track/LocalTrack.ts b/src/room/track/LocalTrack.ts
-index 3042f8d..de2f8e2 100644
+index 3042f8d..ff34943 100644
 --- a/src/room/track/LocalTrack.ts
 +++ b/src/room/track/LocalTrack.ts
 @@ -9,4 +9,5 @@ import {
@@ -1539,7 +1541,13 @@ index 3042f8d..de2f8e2 100644
 +      if (this.manuallyStopped || (recovery && (!recovery.current() || recovery.canStartCapture?.() === false))) return;
        if (!constraints) {
          constraints = this._constraints;
-@@ -422,19 +451,16 @@ export default abstract class LocalTrack<
+@@ -415,4 +444,5 @@ export default abstract class LocalTrack<
+       let mediaStream: MediaStream;
+       try {
++        if (recovery && (!recovery.current() || recovery.canStartCapture?.() === false)) return;
+         mediaStream = await navigator.mediaDevices.getUserMedia(streamConstraints);
+       } catch (e) {
+@@ -422,19 +452,16 @@ export default abstract class LocalTrack<
        const newTrack = mediaStream.getTracks()[0];
        try {
 -        if (this.kind === Track.Kind.Video) {
@@ -1570,7 +1578,7 @@ index 3042f8d..de2f8e2 100644
 +        if (this._mediaStreamTrack !== newTrack && newTrack.readyState !== 'ended') newTrack.stop();
        }
        this._constraints = constraints;
-@@ -455,5 +481,101 @@ export default abstract class LocalTrack<
+@@ -455,5 +482,101 @@ export default abstract class LocalTrack<
    }
  
 +  /** @internal */
@@ -1672,7 +1680,7 @@ index 3042f8d..de2f8e2 100644
 +    if (muted) this.cancelCaptureRecovery();
      this.log.debug(`setting ${this.kind} track ${muted ? 'muted' : 'unmuted'}`, this.logContext);
  
-@@ -478,11 +600,12 @@ export default abstract class LocalTrack<
+@@ -478,11 +601,12 @@ export default abstract class LocalTrack<
    protected async handleAppVisibilityChanged() {
      await super.handleAppVisibilityChanged();
 -    if (!isMobile()) return;
@@ -1690,7 +1698,7 @@ index 3042f8d..de2f8e2 100644
 +      await this.recoverWhenAvailable(() => true, recovery => this.recoverCapture(recovery));
      }
    }
-@@ -494,10 +617,10 @@ export default abstract class LocalTrack<
+@@ -494,10 +618,10 @@ export default abstract class LocalTrack<
  
    private debouncedTrackMuteHandler = debounce(async () => {
 -    await this.pauseUpstream();
@@ -1703,14 +1711,14 @@ index 3042f8d..de2f8e2 100644
 +    await this.setUpstreamPaused('capture', false);
    };
  
-@@ -512,4 +635,6 @@ export default abstract class LocalTrack<
+@@ -512,4 +636,6 @@ export default abstract class LocalTrack<
  
    stop() {
 +    this.cancelCaptureRecovery();
 +    this.debouncedTrackMuteHandler.cancel('stop');
      this.manuallyStopped = true;
      super.stop();
-@@ -533,46 +658,36 @@ export default abstract class LocalTrack<
+@@ -533,46 +659,36 @@ export default abstract class LocalTrack<
     **/
    async pauseUpstream() {
 -    const unlock = await this.pauseUpstreamLock.lock();
@@ -1779,7 +1787,7 @@ index 3042f8d..de2f8e2 100644
 +      return await operation();
      } finally {
        unlock();
-@@ -580,4 +695,14 @@ export default abstract class LocalTrack<
+@@ -580,4 +696,14 @@ export default abstract class LocalTrack<
    }
  
 +  protected async updateBackupTracks(_sending: boolean, _replacement?: MediaStreamTrack, _recovery?: CaptureRecovery): Promise<void> {}
@@ -1794,7 +1802,7 @@ index 3042f8d..de2f8e2 100644
 +
    /**
     * Gets the RTCStatsReport for the LocalTrack's underlying RTCRtpSender
-@@ -660,5 +785,5 @@ export default abstract class LocalTrack<
+@@ -660,5 +786,5 @@ export default abstract class LocalTrack<
            }
          }
 -        await this.sender?.replaceTrack(this.processor.processedTrack);
