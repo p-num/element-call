@@ -1,5 +1,5 @@
 diff --git a/dist/livekit-client.esm.mjs b/dist/livekit-client.esm.mjs
-index c7cfff9..7b0d448 100644
+index c7cfff9..a62aa66 100644
 --- a/dist/livekit-client.esm.mjs
 +++ b/dist/livekit-client.esm.mjs
 @@ -22995,12 +22995,12 @@ class LocalTrack extends Track {
@@ -178,6 +178,20 @@ index c7cfff9..7b0d448 100644
 +          yield this.bindProcessorTrack(this.sender, this.processor.processedTrack);
            this.observeProcessedTrack(this.processor.processedTrack);
          }
+@@ -24149,5 +24142,5 @@ function computeStartTargetBitrate(codec, options, encodings) {
+   }, 0);
+ }
+-function computeTrackBackupEncodings(track, videoCodec, opts) {
++function computeTrackBackupEncodings(track, videoCodec, opts, dimensions) {
+   var _a, _b, _c, _d;
+   // backupCodec should not be true anymore, default codec is set in LocalParticipant.publish
+@@ -24165,5 +24158,5 @@ function computeTrackBackupEncodings(track, videoCodec, opts) {
+   // use backup encoding setting as videoEncoding for backup codec publishing
+   opts.videoEncoding = opts.backupCodec.encoding;
+-  const settings = track.mediaStreamTrack.getSettings();
++  const settings = dimensions ?? track.mediaStreamTrack.getSettings();
+   const width = (_a = settings.width) !== null && _a !== void 0 ? _a : (_b = track.dimensions) === null || _b === void 0 ? void 0 : _b.width;
+   const height = (_c = settings.height) !== null && _c !== void 0 ? _c : (_d = track.dimensions) === null || _d === void 0 ? void 0 : _d.height;
 @@ -24349,4 +24342,8 @@ class LocalVideoTrack extends LocalTrack {
    }
    set sender(sender) {
@@ -296,7 +310,13 @@ index c7cfff9..7b0d448 100644
 -      }
        // The new MediaStreamTrack may have different dimensions than the previous one
        // (e.g. switching between cameras with different native resolutions), which would
-@@ -24697,9 +24629,14 @@ class LocalVideoTrack extends LocalTrack {
+@@ -24685,4 +24617,5 @@ class LocalVideoTrack extends LocalTrack {
+       const unlock = yield this.senderLock.lock();
+       try {
++        const capture = this._mediaStreamTrack;
+         let dims;
+         try {
+@@ -24697,9 +24630,14 @@ class LocalVideoTrack extends LocalTrack {
            return;
          }
 +        const primary = this.sender;
@@ -314,7 +334,12 @@ index c7cfff9..7b0d448 100644
 +        }
          for (const _ref of this.simulcastCodecs) {
            var _ref2 = _slicedToArray(_ref, 2);
-@@ -24717,6 +24654,14 @@ class LocalVideoTrack extends LocalTrack {
+@@ -24713,10 +24651,18 @@ class LocalVideoTrack extends LocalTrack {
+           }
+           const backupOpts = Object.assign({}, this.publishOptions);
+-          const backupEncodings = computeTrackBackupEncodings(this, codec, backupOpts);
++          const backupEncodings = computeTrackBackupEncodings(this, codec, backupOpts, dims);
+           if (!backupEncodings) {
              continue;
            }
 -          yield this.applyEncodingsToSender(sc.sender, backupEncodings);
@@ -327,18 +352,18 @@ index c7cfff9..7b0d448 100644
 +            complete = false;
 +          }
 +        }
-+        if (complete && revision === this.senderRevision) {
++        if (complete && revision === this.senderRevision && capture === this._mediaStreamTrack) {
 +          this.lastEncodedDimensions = dims;
          }
        } catch (e) {
-@@ -24733,5 +24678,5 @@ class LocalVideoTrack extends LocalTrack {
+@@ -24733,5 +24679,5 @@ class LocalVideoTrack extends LocalTrack {
        const params = sender.getParameters();
        if (!params.encodings || params.encodings.length !== encodings.length) {
 -        return;
 +        return false;
        }
        params.encodings.forEach((existing, idx) => {
-@@ -24760,5 +24705,11 @@ class LocalVideoTrack extends LocalTrack {
+@@ -24760,5 +24706,11 @@ class LocalVideoTrack extends LocalTrack {
          encodings: params.encodings
        }));
 -      yield sender.setParameters(params);
@@ -351,21 +376,21 @@ index c7cfff9..7b0d448 100644
 +        }
      });
    }
-@@ -24789,5 +24740,5 @@ class LocalVideoTrack extends LocalTrack {
+@@ -24789,5 +24741,5 @@ class LocalVideoTrack extends LocalTrack {
                _f = false;
                const sc = _c;
 -              yield (_e = sc.sender) === null || _e === void 0 ? void 0 : _e.replaceTrack(_this.processor.processedTrack);
 +              yield _this.bindProcessorTrack(sc.sender, _this.processor.processedTrack);
              }
            } catch (e_4_1) {
-@@ -24863,4 +24814,6 @@ class LocalVideoTrack extends LocalTrack {
+@@ -24863,4 +24815,6 @@ class LocalVideoTrack extends LocalTrack {
          return;
        }
 +      this.senderRevision++;
 +      this.lastEncodedDimensions = undefined;
        simulcastCodecInfo.sender = sender;
        // the backup codec publishes over its own sender, so it needs the same degradation
-@@ -24923,7 +24876,7 @@ class LocalVideoTrack extends LocalTrack {
+@@ -24923,7 +24877,7 @@ class LocalVideoTrack extends LocalTrack {
                  }
                }
 -            } else if (simulcastCodecInfo.encodings) {
@@ -375,7 +400,7 @@ index c7cfff9..7b0d448 100644
 +              yield setPublishingLayersForSender(() => this.simulcastCodecs.get(codec.codec), codec.qualities, this.senderLock, this.isSvcPublish(codec.codec), this.log, this.logContext);
              }
            }
-@@ -24958,8 +24911,5 @@ class LocalVideoTrack extends LocalTrack {
+@@ -24958,8 +24912,5 @@ class LocalVideoTrack extends LocalTrack {
          qualities
        }));
 -      if (!this.sender || !this.encodings) {
@@ -385,7 +410,7 @@ index c7cfff9..7b0d448 100644
 +      yield setPublishingLayersForSender(() => ({ sender: this.sender, encodings: this.encodings }), qualities, this.senderLock, isSvc, this.log, this.logContext);
      });
    }
-@@ -25017,13 +24967,12 @@ class LocalVideoTrack extends LocalTrack {
+@@ -25017,13 +24968,12 @@ class LocalVideoTrack extends LocalTrack {
    }
  }
 -function setPublishingLayersForSender(sender, senderEncodings, qualities, senderLock, isSVC, log, logContext) {
@@ -404,7 +429,7 @@ index c7cfff9..7b0d448 100644
 +      log.debug('setPublishingLayersForSender', { ...logContext, sender, qualities, senderEncodings });
        const params = sender.getParameters();
        const encodings = params.encodings;
-@@ -26077,20 +26026,28 @@ class RTCEngine extends eventsExports.EventEmitter {
+@@ -26077,20 +26027,28 @@ class RTCEngine extends eventsExports.EventEmitter {
      });
    }
 -  createSimulcastSender(track, simulcastTrack, opts, encodings) {
@@ -449,7 +474,7 @@ index c7cfff9..7b0d448 100644
 +    return sender;
    }
    get frameMetadataWorker() {
-@@ -26164,21 +26121,20 @@ class RTCEngine extends eventsExports.EventEmitter {
+@@ -26164,21 +26122,20 @@ class RTCEngine extends eventsExports.EventEmitter {
      });
    }
 -  createSimulcastTransceiverSender(track, simulcastTrack, opts, encodings) {
@@ -486,7 +511,7 @@ index c7cfff9..7b0d448 100644
 +      await track.setSimulcastTrackSender(opts.videoCodec, transceiver.sender);
        return transceiver.sender;
      });
-@@ -38479,3 +38435,3 @@ const serializers = {
+@@ -38479,3 +38436,3 @@ const serializers = {
    raw,
    custom
 -};export{AudioPresets,BackupCodecPolicy,BaseKeyProvider,CLIENT_PROTOCOL_DATA_STREAM_RPC,CLIENT_PROTOCOL_DATA_STREAM_V2,CLIENT_PROTOCOL_DEFAULT,CheckStatus,Checker,ConnectionCheck,ConnectionError,ConnectionErrorReason,ConnectionQuality,ConnectionState,CriticalTimers,CryptorError,CryptorErrorReason,CryptorEvent,DataPacket_Kind,DataStreamError,DataStreamErrorReason,DataTrackPacket,DefaultReconnectPolicy,DeviceUnsupportedError,DisconnectReason,EncryptionEvent,Encryption_Type,EngineEvent,ExternalE2EEKeyProvider,FrameMetadataManager,KeyHandlerEvent,KeyProviderEvent,LivekitError,LivekitReasonedError,LocalAudioTrack,LocalDataTrack,LocalParticipant,LocalTrack,LocalTrackPublication,LocalTrackRecorder,LocalVideoTrack,LogLevel,LoggerNames,MediaDeviceFailure,_ as Mutex,NegotiationError,PacketTrailerManager,Participant,ParticipantEvent,ParticipantInfo_Kind as ParticipantKind,PublishDataError,PublishTrackError,RemoteAudioTrack,RemoteDataTrack,RemoteParticipant,RemoteTrack,RemoteTrackPublication,RemoteVideoTrack,Room,RoomEvent,RpcError,ScreenSharePresets,SignalReconnectError,SignalRequestError,SimulatedError,SubscriptionError,TokenSource,TokenSourceConfigurable,TokenSourceFixed,Track,TrackEvent,TrackInvalidError,TrackPublication,TrackType,UnexpectedConnectionState,UnsupportedServer,VideoPreset,VideoPresets,VideoPresets43,VideoQuality,areTokenSourceFetchOptionsEqual,asEncryptablePacket,attachToElement,attributeTypings as attributes,audioCodecs,canFailOverToAnotherRegion,clientProtocol,compareVersions,createAudioAnalyser,createE2EEKey,createKeyMaterialFromBuffer,createKeyMaterialFromString,createLocalAudioTrack,createLocalScreenTracks,createLocalTracks,createLocalVideoTrack,decodeTokenPayload,deriveKeys,detachTrack,facingModeFromDeviceLabel,facingModeFromLocalTrack,getBrowser,getEmptyAudioStreamTrack,getEmptyVideoStreamTrack,getLogger,importKey,isAudioCodec,isAudioTrack,isBackupCodec,isBackupVideoCodec,isBrowserSupported,isE2EESupported,isInsertableStreamSupported,isLocalParticipant,isLocalTrack,isRemoteParticipant,isRemoteTrack,isSVCCodec,isScriptTransformSupported,isSerializer,isVideoCodec,isVideoFrame,isVideoTrack,needsRbspUnescaping,parseRbsp,protocolVersion,ratchet,releaseEmptyAudioStreamTrack,serializers,setLogExtension,setLogLevel,supportsAV1,supportsAdaptiveStream,supportsAudioOutputSelection,supportsDynacast,supportsH265,supportsVP9,version,videoCodecs,writeRbsp};//# sourceMappingURL=livekit-client.esm.mjs.map
@@ -533,6 +558,23 @@ index e71dab0..99b3665 100644
 +    });
    }
  
+diff --git a/src/room/participant/publishUtils.ts b/src/room/participant/publishUtils.ts
+index 512f640..017af35 100644
+--- a/src/room/participant/publishUtils.ts
++++ b/src/room/participant/publishUtils.ts
+@@ -250,4 +250,5 @@ export function computeTrackBackupEncodings(
+   videoCodec: BackupVideoCodec,
+   opts: TrackPublishOptions,
++  dimensions?: Track.Dimensions,
+ ) {
+   // backupCodec should not be true anymore, default codec is set in LocalParticipant.publish
+@@ -271,5 +272,5 @@ export function computeTrackBackupEncodings(
+   opts.videoEncoding = opts.backupCodec.encoding;
+ 
+-  const settings = track.mediaStreamTrack.getSettings();
++  const settings = dimensions ?? track.mediaStreamTrack.getSettings();
+   const width = settings.width ?? track.dimensions?.width;
+   const height = settings.height ?? track.dimensions?.height;
 diff --git a/src/room/track/LocalAudioTrack.ts b/src/room/track/LocalAudioTrack.ts
 index 0b4bd5b..cc92998 100644
 --- a/src/room/track/LocalAudioTrack.ts
@@ -712,7 +754,7 @@ index 3042f8d..2013955 100644
        }
        this.emit(TrackEvent.TrackProcessorUpdate, this.processor);
 diff --git a/src/room/track/LocalVideoTrack.ts b/src/room/track/LocalVideoTrack.ts
-index 65f72f2..e70ab5a 100644
+index 65f72f2..51833a5 100644
 --- a/src/room/track/LocalVideoTrack.ts
 +++ b/src/room/track/LocalVideoTrack.ts
 @@ -73,4 +73,6 @@ export default class LocalVideoTrack extends LocalTrack<Track.Kind.Video> {
@@ -770,7 +812,13 @@ index 65f72f2..e70ab5a 100644
 -
      // The new MediaStreamTrack may have different dimensions than the previous one
      // (e.g. switching between cameras with different native resolutions), which would
-@@ -331,4 +330,8 @@ export default class LocalVideoTrack extends LocalTrack<Track.Kind.Video> {
+@@ -312,4 +311,5 @@ export default class LocalVideoTrack extends LocalTrack<Track.Kind.Video> {
+     const unlock = await this.senderLock.lock();
+     try {
++      const capture = this._mediaStreamTrack;
+       let dims: Track.Dimensions;
+       try {
+@@ -331,4 +331,8 @@ export default class LocalVideoTrack extends LocalTrack<Track.Kind.Video> {
        }
  
 +      const primary = this.sender;
@@ -779,7 +827,7 @@ index 65f72f2..e70ab5a 100644
 +      this.lastEncodedDimensions = undefined;
        const isScreenShare = this.source === Track.Source.ScreenShare;
        const newEncodings = computeVideoEncodings(isScreenShare, dims.width, dims.height, {
-@@ -336,7 +339,8 @@ export default class LocalVideoTrack extends LocalTrack<Track.Kind.Video> {
+@@ -336,7 +340,8 @@ export default class LocalVideoTrack extends LocalTrack<Track.Kind.Video> {
        });
  
 -      await this.applyEncodingsToSender(this.sender, newEncodings);
@@ -791,7 +839,12 @@ index 65f72f2..e70ab5a 100644
 +      }
  
        for (const [codec, sc] of this.simulcastCodecs) {
-@@ -352,6 +356,14 @@ export default class LocalVideoTrack extends LocalTrack<Track.Kind.Video> {
+@@ -348,10 +353,18 @@ export default class LocalVideoTrack extends LocalTrack<Track.Kind.Video> {
+         }
+         const backupOpts: TrackPublishOptions = { ...this.publishOptions };
+-        const backupEncodings = computeTrackBackupEncodings(this, codec, backupOpts);
++        const backupEncodings = computeTrackBackupEncodings(this, codec, backupOpts, dims);
+         if (!backupEncodings) {
            continue;
          }
 -        await this.applyEncodingsToSender(sc.sender, backupEncodings);
@@ -804,18 +857,18 @@ index 65f72f2..e70ab5a 100644
 +          complete = false;
 +        }
 +      }
-+      if (complete && revision === this.senderRevision) {
++      if (complete && revision === this.senderRevision && capture === this._mediaStreamTrack) {
 +        this.lastEncodedDimensions = dims;
        }
      } catch (e) {
-@@ -371,5 +383,5 @@ export default class LocalVideoTrack extends LocalTrack<Track.Kind.Video> {
+@@ -371,5 +384,5 @@ export default class LocalVideoTrack extends LocalTrack<Track.Kind.Video> {
      const params = sender.getParameters();
      if (!params.encodings || params.encodings.length !== encodings.length) {
 -      return;
 +      return false;
      }
      params.encodings.forEach((existing, idx) => {
-@@ -399,5 +411,11 @@ export default class LocalVideoTrack extends LocalTrack<Track.Kind.Video> {
+@@ -399,5 +412,11 @@ export default class LocalVideoTrack extends LocalTrack<Track.Kind.Video> {
        encodings: params.encodings,
      });
 -    await sender.setParameters(params);
@@ -828,21 +881,21 @@ index 65f72f2..e70ab5a 100644
 +      }
    }
  
-@@ -417,5 +435,5 @@ export default class LocalVideoTrack extends LocalTrack<Track.Kind.Video> {
+@@ -417,5 +436,5 @@ export default class LocalVideoTrack extends LocalTrack<Track.Kind.Video> {
      if (this.processor?.processedTrack) {
        for await (const sc of this.simulcastCodecs.values()) {
 -        await sc.sender?.replaceTrack(this.processor.processedTrack);
 +        await this.bindProcessorTrack(sc.sender, this.processor.processedTrack);
        }
      }
-@@ -481,4 +499,6 @@ export default class LocalVideoTrack extends LocalTrack<Track.Kind.Video> {
+@@ -481,4 +500,6 @@ export default class LocalVideoTrack extends LocalTrack<Track.Kind.Video> {
        return;
      }
 +    this.senderRevision++;
 +    this.lastEncodedDimensions = undefined;
      simulcastCodecInfo.sender = sender;
  
-@@ -540,9 +560,8 @@ export default class LocalVideoTrack extends LocalTrack<Track.Kind.Video> {
+@@ -540,9 +561,8 @@ export default class LocalVideoTrack extends LocalTrack<Track.Kind.Video> {
              }
            }
 -        } else if (simulcastCodecInfo.encodings) {
@@ -854,7 +907,7 @@ index 65f72f2..e70ab5a 100644
 +            () => this.simulcastCodecs.get(codec.codec as VideoCodec),
              codec.qualities,
              this.senderLock,
-@@ -570,11 +589,6 @@ export default class LocalVideoTrack extends LocalTrack<Track.Kind.Video> {
+@@ -570,11 +590,6 @@ export default class LocalVideoTrack extends LocalTrack<Track.Kind.Video> {
      }
      this.log.debug('setting publishing layers', { ...this.logContext, qualities });
 -    if (!this.sender || !this.encodings) {
@@ -867,7 +920,7 @@ index 65f72f2..e70ab5a 100644
 +      () => ({ sender: this.sender, encodings: this.encodings }),
        qualities,
        this.senderLock,
-@@ -673,6 +687,5 @@ export default class LocalVideoTrack extends LocalTrack<Track.Kind.Video> {
+@@ -673,6 +688,5 @@ export default class LocalVideoTrack extends LocalTrack<Track.Kind.Video> {
  
  async function setPublishingLayersForSender(
 -  sender: RTCRtpSender,
@@ -875,7 +928,7 @@ index 65f72f2..e70ab5a 100644
 +  current: () => { sender?: RTCRtpSender; encodings?: RTCRtpEncodingParameters[] } | undefined,
    qualities: SubscribedQuality[],
    senderLock: Mutex,
-@@ -682,6 +695,9 @@ async function setPublishingLayersForSender(
+@@ -682,6 +696,9 @@ async function setPublishingLayersForSender(
  ) {
    const unlock = await senderLock.lock();
 -  log.debug('setPublishingLayersForSender', { ...logContext, sender, qualities, senderEncodings });
