@@ -1,5 +1,5 @@
 diff --git a/dist/livekit-client.esm.mjs b/dist/livekit-client.esm.mjs
-index c7cfff9..6dcc137 100644
+index c7cfff9..7b0d448 100644
 --- a/dist/livekit-client.esm.mjs
 +++ b/dist/livekit-client.esm.mjs
 @@ -22995,12 +22995,12 @@ class LocalTrack extends Track {
@@ -114,10 +114,10 @@ index c7cfff9..6dcc137 100644
 +      const browser = getBrowser();
 +      if (paused && browser?.name === 'Safari' && compareVersions(browser.version, '12.0') < 0) {
 +        throw new DeviceUnsupportedError('pauseUpstream is not supported on Safari < 12.');
-+      }
+       }
 +      if (this.sender.transport?.state !== 'closed') {
 +        await this.sender.replaceTrack(paused ? null : this.mediaStreamTrack);
-       }
++      }
 +      await this.updateBackupTracks(!paused);
      });
    }
@@ -365,7 +365,46 @@ index c7cfff9..6dcc137 100644
 +      this.lastEncodedDimensions = undefined;
        simulcastCodecInfo.sender = sender;
        // the backup codec publishes over its own sender, so it needs the same degradation
-@@ -26077,20 +26030,28 @@ class RTCEngine extends eventsExports.EventEmitter {
+@@ -24923,7 +24876,7 @@ class LocalVideoTrack extends LocalTrack {
+                 }
+               }
+-            } else if (simulcastCodecInfo.encodings) {
++            } else {
+               this.log.debug("try setPublishingLayersForSender ".concat(codec.codec), this.logContext);
+-              yield setPublishingLayersForSender(simulcastCodecInfo.sender, simulcastCodecInfo.encodings, codec.qualities, this.senderLock, this.isSvcPublish(codec.codec), this.log, this.logContext);
++              yield setPublishingLayersForSender(() => this.simulcastCodecs.get(codec.codec), codec.qualities, this.senderLock, this.isSvcPublish(codec.codec), this.log, this.logContext);
+             }
+           }
+@@ -24958,8 +24911,5 @@ class LocalVideoTrack extends LocalTrack {
+         qualities
+       }));
+-      if (!this.sender || !this.encodings) {
+-        return;
+-      }
+-      yield setPublishingLayersForSender(this.sender, this.encodings, qualities, this.senderLock, isSvc, this.log, this.logContext);
++      yield setPublishingLayersForSender(() => ({ sender: this.sender, encodings: this.encodings }), qualities, this.senderLock, isSvc, this.log, this.logContext);
+     });
+   }
+@@ -25017,13 +24967,12 @@ class LocalVideoTrack extends LocalTrack {
+   }
+ }
+-function setPublishingLayersForSender(sender, senderEncodings, qualities, senderLock, isSVC, log, logContext) {
++function setPublishingLayersForSender(current, qualities, senderLock, isSVC, log, logContext) {
+   return __awaiter(this, void 0, void 0, function* () {
+     const unlock = yield senderLock.lock();
+-    log.debug('setPublishingLayersForSender', Object.assign(Object.assign({}, logContext), {
+-      sender,
+-      qualities,
+-      senderEncodings
+-    }));
+     try {
++      const owner = current();
++      if (!owner?.sender || !owner.encodings) return;
++      const { sender, encodings: senderEncodings } = owner;
++      log.debug('setPublishingLayersForSender', { ...logContext, sender, qualities, senderEncodings });
+       const params = sender.getParameters();
+       const encodings = params.encodings;
+@@ -26077,20 +26026,28 @@ class RTCEngine extends eventsExports.EventEmitter {
      });
    }
 -  createSimulcastSender(track, simulcastTrack, opts, encodings) {
@@ -410,7 +449,7 @@ index c7cfff9..6dcc137 100644
 +    return sender;
    }
    get frameMetadataWorker() {
-@@ -26164,21 +26125,20 @@ class RTCEngine extends eventsExports.EventEmitter {
+@@ -26164,21 +26121,20 @@ class RTCEngine extends eventsExports.EventEmitter {
      });
    }
 -  createSimulcastTransceiverSender(track, simulcastTrack, opts, encodings) {
@@ -447,7 +486,7 @@ index c7cfff9..6dcc137 100644
 +      await track.setSimulcastTrackSender(opts.videoCodec, transceiver.sender);
        return transceiver.sender;
      });
-@@ -38479,3 +38439,3 @@ const serializers = {
+@@ -38479,3 +38435,3 @@ const serializers = {
    raw,
    custom
 -};export{AudioPresets,BackupCodecPolicy,BaseKeyProvider,CLIENT_PROTOCOL_DATA_STREAM_RPC,CLIENT_PROTOCOL_DATA_STREAM_V2,CLIENT_PROTOCOL_DEFAULT,CheckStatus,Checker,ConnectionCheck,ConnectionError,ConnectionErrorReason,ConnectionQuality,ConnectionState,CriticalTimers,CryptorError,CryptorErrorReason,CryptorEvent,DataPacket_Kind,DataStreamError,DataStreamErrorReason,DataTrackPacket,DefaultReconnectPolicy,DeviceUnsupportedError,DisconnectReason,EncryptionEvent,Encryption_Type,EngineEvent,ExternalE2EEKeyProvider,FrameMetadataManager,KeyHandlerEvent,KeyProviderEvent,LivekitError,LivekitReasonedError,LocalAudioTrack,LocalDataTrack,LocalParticipant,LocalTrack,LocalTrackPublication,LocalTrackRecorder,LocalVideoTrack,LogLevel,LoggerNames,MediaDeviceFailure,_ as Mutex,NegotiationError,PacketTrailerManager,Participant,ParticipantEvent,ParticipantInfo_Kind as ParticipantKind,PublishDataError,PublishTrackError,RemoteAudioTrack,RemoteDataTrack,RemoteParticipant,RemoteTrack,RemoteTrackPublication,RemoteVideoTrack,Room,RoomEvent,RpcError,ScreenSharePresets,SignalReconnectError,SignalRequestError,SimulatedError,SubscriptionError,TokenSource,TokenSourceConfigurable,TokenSourceFixed,Track,TrackEvent,TrackInvalidError,TrackPublication,TrackType,UnexpectedConnectionState,UnsupportedServer,VideoPreset,VideoPresets,VideoPresets43,VideoQuality,areTokenSourceFetchOptionsEqual,asEncryptablePacket,attachToElement,attributeTypings as attributes,audioCodecs,canFailOverToAnotherRegion,clientProtocol,compareVersions,createAudioAnalyser,createE2EEKey,createKeyMaterialFromBuffer,createKeyMaterialFromString,createLocalAudioTrack,createLocalScreenTracks,createLocalTracks,createLocalVideoTrack,decodeTokenPayload,deriveKeys,detachTrack,facingModeFromDeviceLabel,facingModeFromLocalTrack,getBrowser,getEmptyAudioStreamTrack,getEmptyVideoStreamTrack,getLogger,importKey,isAudioCodec,isAudioTrack,isBackupCodec,isBackupVideoCodec,isBrowserSupported,isE2EESupported,isInsertableStreamSupported,isLocalParticipant,isLocalTrack,isRemoteParticipant,isRemoteTrack,isSVCCodec,isScriptTransformSupported,isSerializer,isVideoCodec,isVideoFrame,isVideoTrack,needsRbspUnescaping,parseRbsp,protocolVersion,ratchet,releaseEmptyAudioStreamTrack,serializers,setLogExtension,setLogLevel,supportsAV1,supportsAdaptiveStream,supportsAudioOutputSelection,supportsDynacast,supportsH265,supportsVP9,version,videoCodecs,writeRbsp};//# sourceMappingURL=livekit-client.esm.mjs.map
@@ -673,7 +712,7 @@ index 3042f8d..2013955 100644
        }
        this.emit(TrackEvent.TrackProcessorUpdate, this.processor);
 diff --git a/src/room/track/LocalVideoTrack.ts b/src/room/track/LocalVideoTrack.ts
-index 65f72f2..9d7f475 100644
+index 65f72f2..e70ab5a 100644
 --- a/src/room/track/LocalVideoTrack.ts
 +++ b/src/room/track/LocalVideoTrack.ts
 @@ -73,4 +73,6 @@ export default class LocalVideoTrack extends LocalTrack<Track.Kind.Video> {
@@ -803,3 +842,47 @@ index 65f72f2..9d7f475 100644
 +    this.lastEncodedDimensions = undefined;
      simulcastCodecInfo.sender = sender;
  
+@@ -540,9 +560,8 @@ export default class LocalVideoTrack extends LocalTrack<Track.Kind.Video> {
+             }
+           }
+-        } else if (simulcastCodecInfo.encodings) {
++        } else {
+           this.log.debug(`try setPublishingLayersForSender ${codec.codec}`, this.logContext);
+           await setPublishingLayersForSender(
+-            simulcastCodecInfo.sender,
+-            simulcastCodecInfo.encodings!,
++            () => this.simulcastCodecs.get(codec.codec as VideoCodec),
+             codec.qualities,
+             this.senderLock,
+@@ -570,11 +589,6 @@ export default class LocalVideoTrack extends LocalTrack<Track.Kind.Video> {
+     }
+     this.log.debug('setting publishing layers', { ...this.logContext, qualities });
+-    if (!this.sender || !this.encodings) {
+-      return;
+-    }
+-
+     await setPublishingLayersForSender(
+-      this.sender,
+-      this.encodings,
++      () => ({ sender: this.sender, encodings: this.encodings }),
+       qualities,
+       this.senderLock,
+@@ -673,6 +687,5 @@ export default class LocalVideoTrack extends LocalTrack<Track.Kind.Video> {
+ 
+ async function setPublishingLayersForSender(
+-  sender: RTCRtpSender,
+-  senderEncodings: RTCRtpEncodingParameters[],
++  current: () => { sender?: RTCRtpSender; encodings?: RTCRtpEncodingParameters[] } | undefined,
+   qualities: SubscribedQuality[],
+   senderLock: Mutex,
+@@ -682,6 +695,9 @@ async function setPublishingLayersForSender(
+ ) {
+   const unlock = await senderLock.lock();
+-  log.debug('setPublishingLayersForSender', { ...logContext, sender, qualities, senderEncodings });
+   try {
++    const owner = current();
++    if (!owner?.sender || !owner.encodings) return;
++    const { sender, encodings: senderEncodings } = owner;
++    log.debug('setPublishingLayersForSender', { ...logContext, sender, qualities, senderEncodings });
+     const params = sender.getParameters();
+     const { encodings } = params;
