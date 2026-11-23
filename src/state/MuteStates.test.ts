@@ -123,6 +123,110 @@ describe("MuteState", () => {
     expect(mute.syncing$.value).toBe(false);
   });
 
+  test("applies a pending lobby choice through the newly installed call handler", async () => {
+    const device = {
+      available$: constant(new Map([["mic", "Microphone"]])),
+      selected$: constant(undefined),
+      select: vi.fn(),
+    };
+    const mute = new MuteState(testScope, device, false, constant(false));
+    mute.setEnabled$.value?.(true);
+    const handler = vi.fn(async (desired: boolean) => Promise.resolve(desired));
+    mute.setHandler(handler);
+    await flushPromises();
+    expect(handler).toHaveBeenCalledExactlyOnceWith(true);
+    expect(mute.enabled$.value).toBe(true);
+  });
+
+  test.each([false, true])(
+    "reapplies off when an older capture rejects after changing the device (forced %s)",
+    async (forced) => {
+      const device = {
+        available$: constant(new Map([["mic", "Microphone"]])),
+        selected$: constant(undefined),
+        select: vi.fn(),
+      };
+      const force$ = new BehaviorSubject(false);
+      const mute = new MuteState(testScope, device, false, force$);
+      const pending = Promise.withResolvers<void>();
+      let capturing = false;
+      mute.setHandler(async (enabled) => {
+        if (enabled) await pending.promise;
+        capturing = enabled;
+        if (enabled) throw new Error("failed after enabling the device");
+        return capturing;
+      });
+      mute.setEnabled$.value?.(true);
+      mute.setEnabled$.value?.(false);
+      if (forced) force$.next(true);
+      await flushPromises();
+      pending.resolve();
+      await flushPromises();
+      expect(capturing).toBe(false);
+      expect(mute.enabled$.value).toBe(false);
+      expect(mute.syncing$.value).toBe(false);
+    },
+  );
+
+  test("keeps the microphone off when its input disappears and returns", async () => {
+    const input = new Map<string, DeviceLabel>([
+      ["mic", { type: "name", name: "Microphone" }],
+    ]);
+    const available$ = new BehaviorSubject(input);
+    const mute = new MuteState(
+      testScope,
+      { available$, selected$: constant(undefined), select: vi.fn() },
+      true,
+      constant(false),
+    );
+    const handler = vi.fn(async (enabled: boolean) => Promise.resolve(enabled));
+    mute.setHandler(handler);
+    mute.setEnabled$.value?.(false);
+    await flushPromises();
+    available$.next(new Map());
+    available$.next(input);
+    await flushPromises();
+    expect(handler).not.toHaveBeenCalledWith(true);
+    expect(mute.enabled$.value).toBe(false);
+  });
+
+  test.each(["forced", "restored", "disposed"] as const)(
+    "settles an old camera enable with controls %s",
+    async (lifetime) => {
+      const forced$ = new BehaviorSubject(false);
+      const device = {
+        available$: constant(new Map([["camera", "Camera"]])),
+        selected$: constant(undefined),
+        select: vi.fn(),
+      };
+      const mute = new MuteState(testScope, device, false, forced$);
+      const first = Promise.withResolvers<void>();
+      let capturing = false;
+      const handler = vi.fn(async (enabled: boolean) => {
+        if (enabled) await first.promise;
+        capturing = enabled;
+        return capturing;
+      });
+      mute.setHandler(handler);
+      mute.setEnabled$.value?.(true);
+      mute.setEnabled$.value?.(false);
+      forced$.next(true);
+      if (lifetime === "restored") forced$.next(false);
+      await flushPromises();
+      expect(capturing).toBe(false);
+      if (lifetime === "disposed") testScope.end();
+      handler.mockClear();
+      first.resolve();
+      await flushPromises();
+      if (lifetime === "disposed") expect(handler).not.toHaveBeenCalled();
+      else {
+        expect(capturing).toBe(false);
+        expect(handler).toHaveBeenCalledExactlyOnceWith(false);
+        expect(mute.enabled$.value).toBe(false);
+      }
+    },
+  );
+
   test("should automatically mute if force mute is set", async () => {
     const forceMute$ = new BehaviorSubject<boolean>(false);
 
@@ -165,11 +269,7 @@ describe("MuteState", () => {
     forceMute$.next(false);
     await flushPromises();
 
-    // TODO I'd expect it to go back to previous state (enabled)
-    // but actually it goes back to the initial state from construction (disabled)
-    // Should go back to previous state (enabled)
-    // Skip for now
-    // expect(lastEnabled).toBe(true);
+    expect(lastEnabled).toBe(true);
 
     // But yet it can be unmuted now
     expect(setEnabled).not.toBeNull();
@@ -318,6 +418,43 @@ describe("MuteStates", () => {
     };
   }
 
+  test("only reports the latest host choice while repairing an older camera enable", async () => {
+    const deviceMute$ = new Subject<
+      HostRequest<DeviceMuteRequest, DeviceMuteState>
+    >();
+    const notifyDeviceMute = vi.fn(async () => Promise.resolve());
+    const mute = new MuteStates(
+      testScope,
+      mockMediaDevices({ videoInput: aVideoInput() }),
+      { audioEnabled: false, videoEnabled: false },
+      { ...nullHostBridge, deviceMute$, notifyDeviceMute },
+    );
+    const pending = Promise.withResolvers<void>();
+    let capturing = false;
+    const handler = vi.fn(async (enabled: boolean) => {
+      if (enabled) await pending.promise;
+      capturing = enabled;
+      return capturing;
+    });
+    mute.video.setHandler(handler);
+    deviceMute$.next({ data: { video_enabled: true }, reply: vi.fn() });
+    const reply = vi.fn();
+    deviceMute$.next({ data: { video_enabled: false }, reply });
+    expect(reply).toHaveBeenCalledExactlyOnceWith({
+      audio_enabled: false,
+      video_enabled: false,
+    });
+    notifyDeviceMute.mockClear();
+    pending.resolve();
+    await flushPromises();
+    expect(notifyDeviceMute).not.toHaveBeenCalledWith({
+      audio_enabled: false,
+      video_enabled: true,
+    });
+    expect(handler).toHaveBeenLastCalledWith(false);
+    expect(capturing).toBe(false);
+  });
+
   test("keeps the host informed and applies its mute requests", async () => {
     const deviceMute$ = new Subject<
       HostRequest<DeviceMuteRequest, DeviceMuteState>
@@ -423,10 +560,8 @@ describe("MuteStates", () => {
     // Try to switch to speaker
     audioOutputDevice.select("0000");
     await flushPromises();
-    // TODO I'd expect it to go back to previous state (enabled)??
-    // But maybe not? If you move the phone away from your ear you may not want it
-    // to automatically enable video?
-    expect(lastVideoEnabled).toBe(false);
+    expect(lastVideoEnabled).toBe(true);
+    expect(latestSyncedState).toBe(true);
 
     // But yet it can be unmuted now
     expect(muteStates.video.setEnabled$.value).toBeDefined();

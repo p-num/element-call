@@ -29,6 +29,18 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+it("leaves sending and pause ownership unchanged on known unsupported Safari", async () => {
+  navigator.userAgent =
+    "Mozilla/5.0 AppleWebKit/605 Version/11.1 Mobile/A Safari/605";
+  const paused = vi.fn();
+  camera.on(TrackEvent.UpstreamPaused, paused);
+  await expect(camera.pauseUpstream()).rejects.toThrow("Safari < 12");
+  expect(camera.isUpstreamPaused).toBe(false);
+  expect(paused).not.toHaveBeenCalled();
+  expect(primary.replaceTrack).not.toHaveBeenCalled();
+  expect(backup.replaceTrack).not.toHaveBeenCalled();
+});
+
 it.each(["caller first", "browser first"])(
   "requires both pause owners to resume (%s)",
   async (order) => {

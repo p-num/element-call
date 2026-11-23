@@ -6,7 +6,14 @@ Please see LICENSE in the repository root for full details.
 */
 
 import { logger as rootLogger } from "matrix-js-sdk/lib/logger";
-import { combineLatest, merge, startWith, Subject, tap } from "rxjs";
+import {
+  combineLatest,
+  distinctUntilChanged,
+  merge,
+  startWith,
+  Subject,
+  tap,
+} from "rxjs";
 
 import type { RTCCallIntent } from "matrix-js-sdk/lib/matrixrtc";
 import {
@@ -95,12 +102,16 @@ export class IOSControlledAudioOutput implements MediaDevice<
         ),
       ],
       (available, preferredId) => {
-        const id = preferredId ?? this.chooseDefaultId(available);
+        const id =
+          preferredId !== undefined && available.has(preferredId)
+            ? preferredId
+            : this.chooseDefaultId(available);
         return id === undefined
           ? undefined
           : { id, virtualEarpiece: id === EARPIECE_CONFIG_ID };
       },
     ).pipe(
+      distinctUntilChanged((a, b) => a?.id === b?.id),
       tap((selected) => {
         this.logger.debug(`selected device: ${selected?.id}`);
       }),
