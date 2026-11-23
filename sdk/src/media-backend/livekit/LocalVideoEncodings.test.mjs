@@ -139,6 +139,42 @@ it.each(["primary", "backup"])(
   },
 );
 
+it("uses the same dimensions for both senders while other camera replacements queue", async () => {
+  const { track, primary, swap } = await publishedCamera();
+  const backup = sender(layers(3));
+  track.addSimulcastTrack("h264", backup.getParameters().encodings).sender =
+    backup;
+  const primaryWrite = deferWrite(primary);
+  const backupWrite = deferWrite(backup);
+  const hd = { width: 1920, height: 1080 };
+  const first = swap(hd);
+  await primaryWrite.started;
+  const second = swap(large);
+  await vi.waitFor(() =>
+    expect(track.mediaStreamTrack.getSettings()).toBe(large),
+  );
+  primaryWrite.release();
+  await backupWrite.started;
+  const third = swap(hd);
+  await vi.waitFor(() => expect(track.mediaStreamTrack.getSettings()).toBe(hd));
+  backupWrite.release();
+  await Promise.all([first, second, third]);
+  expect(primary.encodings.at(-1).maxBitrate).toBe(3_000_000);
+  expect(backup.encodings.at(-1).maxBitrate).toBe(3_000_000);
+});
+
+function deferWrite(rtcSender) {
+  const started = Promise.withResolvers();
+  const accepted = Promise.withResolvers();
+  const write = rtcSender.setParameters.getMockImplementation().bind(rtcSender);
+  rtcSender.setParameters.mockImplementationOnce(async (params) => {
+    started.resolve();
+    await accepted.promise;
+    await write(params);
+  });
+  return { started: started.promise, release: accepted.resolve };
+}
+
 async function publishedCamera() {
   const track = new LocalVideoTrack(new Capture("video", large), {}, false);
   tracks.push(track);
