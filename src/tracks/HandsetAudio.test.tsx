@@ -32,6 +32,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
+  vi.useRealTimers();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
@@ -138,6 +139,105 @@ test("foreground restoration resumes the handset context without HTML playback",
   expect(context.resume).toHaveBeenCalledTimes(resumes + 1);
 });
 
+test.each(["rejected", "pending"])(
+  "recovers after a %s resume without another visibility change",
+  async (failure) => {
+    vi.useFakeTimers();
+    const call = setup(2);
+    const context = Context.instances[0];
+    const pending = Promise.withResolvers<void>();
+    context.resume
+      .mockClear()
+      .mockImplementationOnce(() =>
+        failure === "pending"
+          ? pending.promise
+          : Promise.reject(new Error("busy")),
+      );
+    context.state = "suspended";
+    context.dispatchEvent(new Event("statechange"));
+    context.dispatchEvent(new Event("statechange"));
+    await vi.advanceTimersByTimeAsync(999);
+    expect(context.resume).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(context.state).toBe("running");
+    expect(context.resume).toHaveBeenCalledTimes(2);
+    expect(context.sources).toHaveLength(2);
+    for (const [i, peer] of call.peers.entries()) {
+      expect(peer.track.attachedElements).toHaveLength(0);
+      expect(graph(context, i).handsetGain.gain.value).toBe(0.1);
+      expect(graph(context, i).panner.pan.value).toBe(1);
+    }
+    call.end();
+    pending.resolve();
+    await vi.advanceTimersByTimeAsync(10000);
+    expect(context.resume).toHaveBeenCalledTimes(2);
+  },
+);
+
+test("bounds pending resumes across graph release and reacquisition", async () => {
+  vi.useFakeTimers();
+  const call = setup(2);
+  const context = Context.instances[0];
+  const pending = Promise.withResolvers<void>();
+  context.resume.mockClear().mockImplementation(() => pending.promise);
+  context.state = "suspended";
+  context.dispatchEvent(new Event("statechange"));
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(context.resume).toHaveBeenCalledTimes(2);
+  call.rerender(call.view(true));
+  call.rerender(call.view(false));
+  await vi.advanceTimersByTimeAsync(10000);
+  expect(context.resume).toHaveBeenCalledTimes(2);
+  call.end();
+  pending.resolve();
+  await vi.advanceTimersByTimeAsync(10000);
+  expect(context.resume).toHaveBeenCalledTimes(2);
+});
+
+test("stops retrying after the window and only reopens on a new eligibility edge", async () => {
+  vi.useFakeTimers();
+  const call = setup();
+  const context = Context.instances[0];
+  const hidden = vi.spyOn(document, "hidden", "get").mockReturnValue(false);
+  context.resume.mockClear().mockRejectedValue(new Error("busy"));
+  context.state = "suspended";
+  context.dispatchEvent(new Event("statechange"));
+  await vi.advanceTimersByTimeAsync(20000);
+  expect(context.resume).toHaveBeenCalledTimes(4);
+  document.dispatchEvent(new Event("visibilitychange"));
+  context.dispatchEvent(new Event("statechange"));
+  await vi.advanceTimersByTimeAsync(10000);
+  expect(context.resume).toHaveBeenCalledTimes(4);
+  hidden.mockReturnValue(true);
+  document.dispatchEvent(new Event("visibilitychange"));
+  hidden.mockReturnValue(false);
+  document.dispatchEvent(new Event("visibilitychange"));
+  expect(context.resume).toHaveBeenCalledTimes(5);
+  context.state = "closed";
+  context.dispatchEvent(new Event("statechange"));
+  await vi.advanceTimersByTimeAsync(10000);
+  expect(context.resume).toHaveBeenCalledTimes(5);
+  call.end();
+});
+
+test("ordinary output and zero participant volume do not wake a suspended context", async () => {
+  vi.useFakeTimers();
+  route.earpiece = false;
+  const call = setup();
+  const context = Context.instances[0];
+  context.state = "suspended";
+  context.resume.mockClear();
+  document.dispatchEvent(new Event("visibilitychange"));
+  expect(call.peers[0].track.attachedElements).toHaveLength(1);
+  act(() => call.peers[0].media.setVolume(0));
+  route.earpiece = true;
+  call.rerender(call.view());
+  document.dispatchEvent(new Event("visibilitychange"));
+  await vi.advanceTimersByTimeAsync(10000);
+  expect(context.resume).not.toHaveBeenCalled();
+  call.end();
+});
+
 class Stream extends EventTarget {
   constructor(private tracks: MediaStreamTrack[] = []) {
     super();
@@ -164,7 +264,7 @@ class AudioNodeMock {
   gain = { value: 1, setValueAtTime: vi.fn(), setTargetAtTime: vi.fn() };
   pan = { value: 0 };
 }
-class Context {
+class Context extends EventTarget {
   static instances: Context[] = [];
   state = "running";
   destination = new AudioNodeMock();
@@ -172,6 +272,7 @@ class Context {
   gains: AudioNodeMock[] = [];
   panners: AudioNodeMock[] = [];
   constructor() {
+    super();
     Context.instances.push(this);
   }
   createOscillator = () => ({ connect: vi.fn(), start: vi.fn() });
