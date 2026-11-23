@@ -418,6 +418,43 @@ describe("MuteStates", () => {
     };
   }
 
+  test("only reports the latest host choice while repairing an older camera enable", async () => {
+    const deviceMute$ = new Subject<
+      HostRequest<DeviceMuteRequest, DeviceMuteState>
+    >();
+    const notifyDeviceMute = vi.fn(async () => Promise.resolve());
+    const mute = new MuteStates(
+      testScope,
+      mockMediaDevices({ videoInput: aVideoInput() }),
+      { audioEnabled: false, videoEnabled: false },
+      { ...nullHostBridge, deviceMute$, notifyDeviceMute },
+    );
+    const pending = Promise.withResolvers<void>();
+    let capturing = false;
+    const handler = vi.fn(async (enabled: boolean) => {
+      if (enabled) await pending.promise;
+      capturing = enabled;
+      return capturing;
+    });
+    mute.video.setHandler(handler);
+    deviceMute$.next({ data: { video_enabled: true }, reply: vi.fn() });
+    const reply = vi.fn();
+    deviceMute$.next({ data: { video_enabled: false }, reply });
+    expect(reply).toHaveBeenCalledExactlyOnceWith({
+      audio_enabled: false,
+      video_enabled: false,
+    });
+    notifyDeviceMute.mockClear();
+    pending.resolve();
+    await flushPromises();
+    expect(notifyDeviceMute).not.toHaveBeenCalledWith({
+      audio_enabled: false,
+      video_enabled: true,
+    });
+    expect(handler).toHaveBeenLastCalledWith(false);
+    expect(capturing).toBe(false);
+  });
+
   test("keeps the host informed and applies its mute requests", async () => {
     const deviceMute$ = new Subject<
       HostRequest<DeviceMuteRequest, DeviceMuteState>
