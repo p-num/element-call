@@ -12,6 +12,7 @@ import {
   LocalParticipant,
   LocalTrackPublication,
   LocalVideoTrack,
+  Room,
   Track,
   TrackEvent,
 } from "livekit-client";
@@ -203,6 +204,129 @@ it.each([
   else expect(fixture.participant.trackPublications.size).toBe(0);
   expect(acquire).not.toHaveBeenCalled();
 });
+
+it("retries a candidate microphone that ends while the sender bind is pending", async () => {
+  const { track, primary, end, participant } =
+    await publishThroughRoom("audio");
+  const first = new Capture("audio");
+  const next = new Capture("audio");
+  acquire
+    .mockResolvedValueOnce(new Stream([first]))
+    .mockResolvedValueOnce(new Stream([next]));
+  const started = Promise.withResolvers();
+  const finish = Promise.withResolvers();
+  primary.replaceTrack.mockImplementationOnce(async (candidate) => {
+    started.resolve();
+    await finish.promise;
+    primary.track = candidate;
+  });
+  const original = track.mediaStreamTrack;
+  end();
+  await started.promise;
+  first.stop();
+  first.dispatchEvent(new Event("ended"));
+  finish.resolve();
+  await tick();
+  expect(track.mediaStreamTrack).toBe(original);
+  foreground();
+  await vi.waitFor(() => expect(primary.track).toBe(next));
+  expect(
+    participant.getTrackPublication(Track.Source.Microphone).track
+      .mediaStreamTrack,
+  ).toBe(next);
+  expect(acquire).toHaveBeenCalledTimes(2);
+});
+
+it("discards a processed camera output produced after unpublish cancels recovery", async () => {
+  const { track, end, participant } = await publishThroughRoom("video");
+  const originalOutput = new Capture("video");
+  const rejected = new Capture("video");
+  const started = Promise.withResolvers();
+  const finish = Promise.withResolvers();
+  const processor = {
+    name: "delayed output",
+    async init() {
+      this.processedTrack = originalOutput;
+      return Promise.resolve();
+    },
+    async restart() {
+      this.processedTrack.stop();
+      started.resolve();
+      await finish.promise;
+      this.processedTrack = rejected;
+    },
+    async destroy() {
+      this.processedTrack?.stop();
+      return Promise.resolve();
+    },
+  };
+  await track.setProcessor(processor);
+  const candidate = new Capture("video");
+  acquire.mockResolvedValueOnce(new Stream([candidate]));
+  end();
+  await started.promise;
+  await participant.unpublishTrack(track, false);
+  finish.resolve();
+  await tick();
+  expect(candidate.readyState).toBe("ended");
+  expect(rejected.readyState).toBe("ended");
+  expect(track.mediaStreamTrack).not.toBe(rejected);
+});
+
+async function publishThroughRoom(kind) {
+  const room = new Room();
+  const participant = room.localParticipant;
+  const engine = room.engine;
+  const source =
+    kind === "audio" ? Track.Source.Microphone : Track.Source.Camera;
+  const capture = new Capture(kind, { width: 640, height: 360 });
+  const track =
+    kind === "audio"
+      ? new LocalAudioTrack(capture, {}, false)
+      : new LocalVideoTrack(capture, {}, false);
+  tracks.push(track);
+  const primary = sender();
+  primary.track = capture;
+  primary.replaceTrack.mockImplementation(async (next) => {
+    primary.track = next;
+    return Promise.resolve();
+  });
+  Object.defineProperty(engine.client, "currentState", { value: 1 });
+  Object.defineProperty(engine, "isClosed", { value: false });
+  engine.pcManager = {
+    currentState: 0,
+    publisher: {
+      getTransceivers: () => [{ sender: primary, direction: "sendonly" }],
+    },
+  };
+  engine.addTrack = vi
+    .fn()
+    .mockImplementation(async (request) =>
+      Promise.resolve({
+        ...request,
+        sid: "public-track",
+        codecs: [],
+        audioFeatures: [],
+      }),
+    );
+  engine.createSender = vi.fn().mockResolvedValue(primary);
+  engine.removeTrack = () => {
+    primary.track = null;
+    return true;
+  };
+  engine.negotiate = vi.fn().mockResolvedValue(undefined);
+  participant.setPermissions({ canPublish: true, canPublishSources: [] });
+  await participant.publishTrack(track, { source, simulcast: false });
+  return {
+    track,
+    primary,
+    participant,
+    end() {
+      capture.stop();
+      capture.dispatchEvent(new Event("ended"));
+    },
+  };
+}
 
 async function published(kind, provided = false) {
   const capture = new Capture(kind);
