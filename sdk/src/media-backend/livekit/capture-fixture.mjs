@@ -61,6 +61,7 @@ export function sender(encodings = []) {
     },
     setParameters: vi.fn(async function (params) {
       this.encodings = structuredClone(params.encodings);
+      return Promise.resolve();
     }),
     replaceTrack: vi.fn(async () => {}),
   };

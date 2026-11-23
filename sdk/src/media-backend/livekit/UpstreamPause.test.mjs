@@ -101,8 +101,8 @@ it("negotiates a backup sender detached under a caller hold", async () => {
   const engine = new Room().engine;
   const late = sender();
   const pc = {
-    addPublisherTransceiver: vi.fn(async () => ({ sender: late })),
-    addPublisherTransceiverOfKind: vi.fn(async () => ({ sender: late })),
+    addPublisherTransceiver: vi.fn().mockResolvedValue({ sender: late }),
+    addPublisherTransceiverOfKind: vi.fn().mockResolvedValue({ sender: late }),
   };
   engine.pcManager = pc;
   const sc = camera.addSimulcastTrack("vp8");

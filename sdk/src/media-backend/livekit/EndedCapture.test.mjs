@@ -21,11 +21,13 @@ let acquire, enumerate, permission, query, visibility;
 const tracks = [];
 beforeEach(() => {
   acquire = vi.fn();
-  enumerate = vi.fn(async () => [{ kind: "audioinput", deviceId: "fallback" }]);
+  enumerate = vi
+    .fn()
+    .mockResolvedValue([{ kind: "audioinput", deviceId: "fallback" }]);
   permission = new EventTarget();
   permission.state = "granted";
   permission.addEventListener("change", () => permission.onchange?.());
-  query = vi.fn(async () => permission);
+  query = vi.fn().mockResolvedValue(permission);
   vi.stubGlobal("MediaStream", Stream);
   vi.stubGlobal("MediaStreamTrack", Capture);
   vi.stubGlobal("navigator", {
@@ -264,6 +266,6 @@ function foreground() {
   document.dispatchEvent(new Event("visibilitychange"));
 }
 
-function tick() {
+async function tick() {
   return new Promise((resolve) => setTimeout(resolve, 0));
 }

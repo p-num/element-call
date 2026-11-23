@@ -172,12 +172,14 @@ it("uses the processed dimensions for a two-layer backup on a larger raw camera"
     name: "resize",
     async init() {
       this.processedTrack = new Capture("video", small);
+      return Promise.resolve();
     },
     async restart() {
       await this.init();
     },
     async destroy() {
       this.processedTrack.stop();
+      return Promise.resolve();
     },
   };
   await track.setProcessor(processor);
@@ -219,7 +221,7 @@ async function publishedCamera() {
   return {
     track,
     primary,
-    swap: (dims) => track.replaceTrack(new Capture("video", dims), false),
+    swap: async (dims) => track.replaceTrack(new Capture("video", dims), false),
   };
 }
 
