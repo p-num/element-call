@@ -37,22 +37,45 @@ type DiagnosticAttachment = {
   contents: string;
   length: number;
 };
+type RequestDiagnostics = (
+  eventId: string,
+  timestamp: number,
+) => Promise<unknown> | null;
 
 declare global {
   interface Window {
     __letroCallAudioDiagnostics?: {
-      sentryAttachment?: (
-        eventId: string,
-        timestamp: number,
-      ) => Promise<unknown> | null;
+      sentryAttachment?: RequestDiagnostics;
     };
   }
+}
+
+export function iosSentryDiagnosticRequest(): RequestDiagnostics | undefined {
+  if (import.meta.env.VITE_IOS_SENTRY_ATTACHMENTS !== "true") return undefined;
+  const property = Object.getOwnPropertyDescriptor(
+    window,
+    "__letroCallAudioDiagnostics",
+  );
+  if (property?.configurable !== false || property.writable !== false)
+    return undefined;
+  const bridge = window.__letroCallAudioDiagnostics;
+  return Object.isFrozen(bridge) &&
+    typeof bridge?.sentryAttachment === "function"
+    ? bridge.sentryAttachment
+    : undefined;
 }
 
 export function createEmbeddedSentryReporting(
   delegateTransport: typeof makeFetchTransport,
   metadata: Pick<Event, "environment" | "release">,
+  diagnostics?: {
+    request: RequestDiagnostics;
+    fetch?: typeof globalThis.fetch;
+  },
 ) {
+  const sendRequest = diagnostics
+    ? (diagnostics.fetch ?? window.fetch?.bind(window))
+    : undefined;
   const captured = new WeakMap<EventHint, CapturedEvent>();
   const dispatchable = new WeakMap<object, CapturedEvent>();
   const integration = {
@@ -68,12 +91,12 @@ export function createEmbeddedSentryReporting(
       });
       client.addEventProcessor((event, hint): Event | PromiseLike<Event> => {
         const capture = captured.get(hint);
-        const bridge = window.__letroCallAudioDiagnostics;
         const { event_id: eventId, timestamp } = event;
         if (
           capture?.type !== "event" ||
           capture.generation !== currentConsentGeneration("event") ||
-          !bridge?.sentryAttachment ||
+          !diagnostics ||
+          !sendRequest ||
           !isError(event) ||
           !validEventId(eventId) ||
           typeof timestamp !== "number" ||
@@ -82,7 +105,7 @@ export function createEmbeddedSentryReporting(
           return event;
         // Keep the bridge deadline inside Sentry's event processing so flush waits for it.
         return readDiagnostics(eventId, async () =>
-          bridge.sentryAttachment?.(eventId, timestamp),
+          diagnostics.request(eventId, timestamp),
         ).then((diagnostics) => {
           capture.diagnostics = diagnostics;
           return event;
@@ -98,10 +121,21 @@ export function createEmbeddedSentryReporting(
     },
   };
   const transport: typeof makeFetchTransport = (options) => {
-    const delegate = delegateTransport({
-      ...options,
-      fetchOptions: { ...options.fetchOptions, referrerPolicy: "no-referrer" },
-    });
+    const delegate = delegateTransport(
+      {
+        ...options,
+        fetchOptions: {
+          ...options.fetchOptions,
+          referrerPolicy: "no-referrer",
+        },
+      },
+      sendRequest &&
+        (async (input, init) => {
+          // Sentry can rate-limit the error independently from its attachment.
+          if (!startsWithEvent(init?.body)) return new Response(null);
+          return sendRequest(input, init);
+        }),
+    );
     return {
       send: async (envelope) => {
         const safe = safeEnvelope(envelope, metadata, dispatchable);
@@ -157,7 +191,7 @@ function safeEnvelope(
     }
   }
   if (events.length === 0) return undefined;
-  if (diagnostics)
+  if (diagnostics && events.length === 1)
     events.push([
       {
         type: "attachment",
@@ -176,6 +210,24 @@ function safeEnvelope(
 
 function validEventId(id: unknown): id is string {
   return typeof id === "string" && /^[0-9a-f]{32}$/i.test(id);
+}
+
+function startsWithEvent(body: RequestInit["body"]): boolean {
+  if (typeof body !== "string") return false;
+  const start = body.indexOf("\n") + 1;
+  const end = body.indexOf("\n", start);
+  if (start === 0 || end < start) return false;
+  try {
+    const first: unknown = JSON.parse(body.slice(start, end));
+    return (
+      typeof first === "object" &&
+      first !== null &&
+      "type" in first &&
+      (first.type === "event" || first.type === "transaction")
+    );
+  } catch {
+    return false;
+  }
 }
 
 function isError({ level, exception }: Event): boolean {
@@ -199,7 +251,16 @@ async function readDiagnostics(
     ]);
     if (typeof result !== "string" || !result.length || result.length > limit)
       return undefined;
-    JSON.parse(result);
+    const value: unknown = JSON.parse(result);
+    if (
+      typeof value !== "object" ||
+      value === null ||
+      !("schema" in value && value.schema === 1 && "entries" in value) ||
+      !Array.isArray(value.entries) ||
+      value.entries.length === 0 ||
+      value.entries.length > 64
+    )
+      return undefined;
     const length = new TextEncoder().encode(result).byteLength;
     return length <= limit ? { eventId, contents: result, length } : undefined;
   } catch {

@@ -16,7 +16,10 @@ import {
 } from "@sentry/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createEmbeddedSentryReporting } from "./EmbeddedSentryTransport";
+import {
+  createEmbeddedSentryReporting,
+  iosSentryDiagnosticRequest,
+} from "./EmbeddedSentryTransport";
 import { setSentryReportingEnabled } from "./SentryReporting";
 
 describe("embedded Sentry requests", () => {
@@ -44,6 +47,7 @@ describe("embedded Sentry requests", () => {
   afterEach(() => {
     setSentryReportingEnabled(false, false);
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
   });
 
   it.each(["event", "transaction"] as const)(
@@ -251,7 +255,13 @@ describe("embedded Sentry requests", () => {
     expect(request).not.toHaveBeenCalled();
   });
 
-  it.each(["reject", "malformed", "oversize", "timeout"] as const)(
+  it.each([
+    "reject",
+    "malformed",
+    "untrusted-shape",
+    "oversize",
+    "timeout",
+  ] as const)(
     "sends the original error when the iOS attachment is a %s",
     async (failure) => {
       setSentryReportingEnabled(true, false);
@@ -261,6 +271,8 @@ describe("embedded Sentry requests", () => {
             throw new Error("Bridge rejected the request");
           case "malformed":
             return "invalid attachment";
+          case "untrusted-shape":
+            return '{"token":"private"}';
           case "oversize":
             return "x".repeat(32_769);
           case "timeout":
@@ -285,6 +297,31 @@ describe("embedded Sentry requests", () => {
     },
   );
 
+  it("ignores a mutable hook even when compiled for iOS", () => {
+    vi.stubEnv("VITE_IOS_SENTRY_ATTACHMENTS", "true");
+    vi.stubGlobal("__letroCallAudioDiagnostics", {
+      sentryAttachment: vi.fn(),
+    });
+    expect(iosSentryDiagnosticRequest()).toBeUndefined();
+  });
+
+  it("does not invoke an accessor posing as the iOS hook", () => {
+    vi.stubEnv("VITE_IOS_SENTRY_ATTACHMENTS", "true");
+    const read = vi.fn(() => {
+      throw new Error("Not a native data property");
+    });
+    Object.defineProperty(window, "__letroCallAudioDiagnostics", {
+      configurable: true,
+      get: read,
+    });
+    try {
+      expect(iosSentryDiagnosticRequest()).toBeUndefined();
+      expect(read).not.toHaveBeenCalled();
+    } finally {
+      Reflect.deleteProperty(window, "__letroCallAudioDiagnostics");
+    }
+  });
+
   it("keeps the iOS bridge out of the performance path", async () => {
     setSentryReportingEnabled(true, true);
     const sentryAttachment = vi.fn();
@@ -304,6 +341,37 @@ describe("embedded Sentry requests", () => {
     expect(sentryAttachment).not.toHaveBeenCalled();
   });
 
+  it("never transmits diagnostics when Sentry rate-limits only the error", async () => {
+    setSentryReportingEnabled(true, false);
+    const sentryAttachment = vi
+      .fn()
+      .mockResolvedValue('{"schema":1,"entries":[{"source":"callWeb"}]}');
+    vi.stubGlobal("__letroCallAudioDiagnostics", { sentryAttachment });
+    const { client, request } = createClient();
+    request.mockResolvedValueOnce(
+      new Response(null, {
+        status: 200,
+        headers: { "X-Sentry-Rate-Limits": "60:error:organization" },
+      }),
+    );
+
+    client.captureEvent(
+      { level: "error", message: "first error" },
+      {},
+      new Scope(),
+    );
+    expect(await client.flush(1_000)).toBe(true);
+    client.captureEvent(
+      { level: "error", message: "rate-limited error" },
+      {},
+      new Scope(),
+    );
+    expect(await client.flush(1_000)).toBe(true);
+
+    expect(sentryAttachment).toHaveBeenCalledTimes(2);
+    expect(request).toHaveBeenCalledOnce();
+  });
+
   function serializedEnvelope(body: RequestInit["body"]): string {
     if (typeof body !== "string")
       throw new TypeError("Expected a serialized Sentry envelope");
@@ -314,9 +382,12 @@ describe("embedded Sentry requests", () => {
     const request = vi
       .fn<typeof globalThis.fetch>()
       .mockResolvedValue(new Response("", { status: 200 }));
+    const requestDiagnostics =
+      window.__letroCallAudioDiagnostics?.sentryAttachment;
     const reporting = createEmbeddedSentryReporting(
-      (options) => makeFetchTransport(options, request),
+      (options, fetch) => makeFetchTransport(options, fetch ?? request),
       { ...metadata, environment },
+      requestDiagnostics && { request: requestDiagnostics, fetch: request },
     );
     const client = new BrowserClient({
       ...metadata,
