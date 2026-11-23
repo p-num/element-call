@@ -424,7 +424,7 @@ it("respects the start deadline after waiting for the fallback microphone list",
 });
 
 it("accepts a timely request that settles after the deadline and preserves caller pause", async () => {
-  const fixture = await busyForeground("audio", "iPad");
+  const fixture = await busyForeground("audio");
   await fixture.track.pauseUpstream();
   const pending = Promise.withResolvers();
   acquire.mockReturnValueOnce(pending.promise);
