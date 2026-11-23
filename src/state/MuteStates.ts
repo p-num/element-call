@@ -22,11 +22,11 @@ import { type ObservableScope } from "./ObservableScope";
 import { type Behavior, constant } from "./Behavior";
 
 export type Handler = (desired: boolean) => Promise<boolean>;
-const defaultHandler: Handler = async (desired) => desired;
+const defaultHandler: Handler = async (desired) => Promise.resolve(desired);
 
 /** The user's capture choice and the device state allowed by this call. */
 export class MuteState<Label, Selected> {
-  private handler: Handler = defaultHandler;
+  private handler = { apply: defaultHandler };
   private desired: boolean;
   private controls?: object;
   private ended = false;
@@ -62,7 +62,7 @@ export class MuteState<Label, Selected> {
           if (!eligible) {
             this.enabled.next(false);
             this.apply(false);
-          } else if (this.handler === defaultHandler) {
+          } else if (this.handler.apply === defaultHandler) {
             this.enabled.next(this.desired);
           } else {
             this.reconcile();
@@ -102,7 +102,7 @@ export class MuteState<Label, Selected> {
   }
 
   public setHandler(handler: Handler): void {
-    if (this.handler !== defaultHandler)
+    if (this.handler.apply !== defaultHandler)
       throw new Error("Multiple mute state handlers are not supported");
     this.replaceHandler(handler);
   }
@@ -112,10 +112,12 @@ export class MuteState<Label, Selected> {
   }
 
   private replaceHandler(handler: Handler): void {
-    this.handler = handler;
+    const wasPending = !!this.pending;
+    this.handler = { apply: handler };
     this.pending = undefined;
     this.needsRepair = false;
     this.syncing.next(false);
+    if (wasPending && this.controls && !this.ended) this.reconcile();
   }
 
   private get target(): boolean {
@@ -139,20 +141,25 @@ export class MuteState<Label, Selected> {
     this.syncing.next(!!this.controls);
     const finish = (result: boolean | undefined): void => {
       if (this.ended || this.handler !== handler) return;
+      // A failed enable can throw after it changed the physical device.
+      const uncertainEnable = result === undefined && target && !this.target;
       if (this.pending !== request) {
-        // A superseded publication can still change the real device.
-        if (result !== undefined && result !== this.target) {
+        if (
+          uncertainEnable ||
+          (result !== undefined && result !== this.target)
+        ) {
           this.needsRepair = true;
           this.reconcile();
         }
         return;
       }
       this.pending = undefined;
+      this.needsRepair ||= uncertainEnable;
       if (this.controls && result !== undefined) this.enabled.next(result);
       if (this.needsRepair || target !== this.target) this.reconcile();
       if (!this.pending) this.syncing.next(false);
     };
-    void handler(target).then(finish, (err: unknown) => {
+    void handler.apply(target).then(finish, (err: unknown) => {
       logger.error("MuteState: handler error", err);
       finish(undefined);
     });
