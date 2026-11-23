@@ -109,10 +109,12 @@ export function createLivekitMediaTrack(
     }
   };
   const startPlayback = (): void => {
-    if (volume === 0 || attached.size === 0) return;
+    const element = attached.values().next().value;
+    if (volume === 0 || !element) return;
     if (audioContext && current instanceof RemoteAudioTrack) {
       handset = createHandsetPlayback(
         audioContext,
+        element.ownerDocument,
         current.mediaStreamTrack,
         audioPlugins,
         volume ?? 1,

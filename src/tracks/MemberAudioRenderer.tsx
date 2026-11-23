@@ -17,7 +17,6 @@ import { useEarpieceAudioConfig } from "../MediaDevicesContext";
 import { useBehavior } from "../useBehavior";
 import * as controls from "../controls";
 import { useRootElement } from "../RootElementContext";
-import { logger } from "matrix-js-sdk/lib/logger";
 
 export interface MemberAudioRendererProps {
   /** The remote members whose audio should be heard; never the local one. */
@@ -70,21 +69,7 @@ export const MemberAudioRenderer: FC<MemberAudioRendererProps> = ({
   useEffect(() => {
     const ctx = new AudioContext();
     setAudioContext(ctx);
-    const resume = (): void => {
-      if (
-        !ownerDocument.hidden &&
-        ctx.state !== "closed" &&
-        ctx.state !== "running"
-      )
-        void ctx
-          .resume()
-          .catch((error) =>
-            logger.warn("Unable to resume handset audio", error),
-          );
-    };
-    ownerDocument.addEventListener("visibilitychange", resume);
     return (): void => {
-      ownerDocument.removeEventListener("visibilitychange", resume);
       void ctx.close();
     };
   }, [ownerDocument]);
