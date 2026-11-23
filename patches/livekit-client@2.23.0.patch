@@ -1,5 +1,5 @@
 diff --git a/dist/livekit-client.esm.mjs b/dist/livekit-client.esm.mjs
-index c7cfff9..3614e9f 100644
+index c7cfff9..75915fa 100644
 --- a/dist/livekit-client.esm.mjs
 +++ b/dist/livekit-client.esm.mjs
 @@ -22974,4 +22974,5 @@ class LocalTrack extends Track {
@@ -519,6 +519,10 @@ index c7cfff9..3614e9f 100644
 +      if (!this.sender)
 +        return;
 +      const wasPaused = this.isUpstreamPaused;
++      const browser = getBrowser();
++      if (paused && !wasPaused && browser?.name === 'Safari' && browser.version && compareVersions(browser.version, '12.0') < 0) {
++        throw new DeviceUnsupportedError('pauseUpstream is not supported on Safari < 12.');
++      }
 +      if (paused)
 +        this.pauseReasons.add(reason);
 +      else
@@ -526,10 +530,6 @@ index c7cfff9..3614e9f 100644
 +      if (wasPaused === this.isUpstreamPaused)
 +        return;
 +      this.emit(paused ? TrackEvent.UpstreamPaused : TrackEvent.UpstreamResumed, this);
-+      const browser = getBrowser();
-+      if (paused && browser?.name === 'Safari' && compareVersions(browser.version, '12.0') < 0) {
-+        throw new DeviceUnsupportedError('pauseUpstream is not supported on Safari < 12.');
-+      }
 +      if (this.sender.transport?.state !== 'closed') {
 +        await this.sender.replaceTrack(paused ? null : this.mediaStreamTrack);
        }
@@ -697,10 +697,7 @@ index c7cfff9..3614e9f 100644
 -    const _super = Object.create(null, {
 -      resumeUpstream: {
 -        get: () => super.resumeUpstream
-+      finally {
-+        if (next && sc.mediaStreamTrack !== next && next.readyState !== 'ended')
-+          next.stop();
-       }
+-      }
 -    });
 -    return __awaiter(this, void 0, void 0, function* () {
 -      var _a, e_2, _b, _c;
@@ -723,7 +720,10 @@ index c7cfff9..3614e9f 100644
 -        } finally {
 -          if (e_2) throw e_2.error;
 -        }
--      }
++      finally {
++        if (next && sc.mediaStreamTrack !== next && next.readyState !== 'ended')
++          next.stop();
+       }
 -    });
 +    }
    }
@@ -1344,7 +1344,7 @@ index 0b4bd5b..a02ca1b 100644
          this.observeProcessedTrack(this.processor.processedTrack);
        }
 diff --git a/src/room/track/LocalTrack.ts b/src/room/track/LocalTrack.ts
-index 3042f8d..e2c06ff 100644
+index 3042f8d..de2f8e2 100644
 --- a/src/room/track/LocalTrack.ts
 +++ b/src/room/track/LocalTrack.ts
 @@ -9,4 +9,5 @@ import {
@@ -1728,24 +1728,24 @@ index 3042f8d..e2c06ff 100644
 +  async resumeUpstream() {
 +    await this.setUpstreamPaused('caller', false);
 +  }
-+
+ 
+-      this._isUpstreamPaused = true;
+-      this.emit(TrackEvent.UpstreamPaused, this);
 +  private async setUpstreamPaused(reason: 'caller' | 'capture', paused: boolean) {
 +    await this.withUpstreamLock(async () => {
 +      if (!this.sender) return;
 +      const wasPaused = this.isUpstreamPaused;
-+      if (paused) this.pauseReasons.add(reason);
-+      else this.pauseReasons.delete(reason);
-+      if (wasPaused === this.isUpstreamPaused) return;
- 
--      this._isUpstreamPaused = true;
--      this.emit(TrackEvent.UpstreamPaused, this);
-+      this.emit(paused ? TrackEvent.UpstreamPaused : TrackEvent.UpstreamResumed, this);
        const browser = getBrowser();
 -      if (browser?.name === 'Safari' && compareVersions(browser.version, '12.0') < 0) {
 -        // https://bugs.webkit.org/show_bug.cgi?id=184911
-+      if (paused && browser?.name === 'Safari' && compareVersions(browser.version, '12.0') < 0) {
++      if (paused && !wasPaused && browser?.name === 'Safari' && browser.version && compareVersions(browser.version, '12.0') < 0) {
          throw new DeviceUnsupportedError('pauseUpstream is not supported on Safari < 12.');
        }
++      if (paused) this.pauseReasons.add(reason);
++      else this.pauseReasons.delete(reason);
++      if (wasPaused === this.isUpstreamPaused) return;
++
++      this.emit(paused ? TrackEvent.UpstreamPaused : TrackEvent.UpstreamResumed, this);
        if (this.sender.transport?.state !== 'closed') {
 -        await this.sender.replaceTrack(null);
 +        await this.sender.replaceTrack(paused ? null : this.mediaStreamTrack);

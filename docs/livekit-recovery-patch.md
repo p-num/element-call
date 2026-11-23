@@ -23,7 +23,9 @@ of the failure. The SDK rechecks visibility, permission and publication before
 adopting the candidate. A later foreground event can still recover the same
 publication when the delayed attempt was ineligible.
 
-Caller/admission holds and browser capture holds are independent. Replacing capture
+Caller/admission holds and browser capture holds are independent. A WebView can
+omit the Safari version in its user agent. The legacy pause restriction applies
+only to a known Safari version below 12 and leaves pause ownership unchanged. Replacing capture
 preserves an existing caller hold for primary and backup senders. Initial primary
 publication continues to use the existing admission architecture.
 
