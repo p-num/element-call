@@ -356,6 +356,20 @@ it.each(["hidden", "denied", "mute", "unpublish"])(
   },
 );
 
+it("checks the acquisition deadline immediately before asking the browser", async () => {
+  const fixture = await busyForeground("video");
+  const clock = vi.spyOn(performance, "now");
+  const stop = fixture.track.mediaStreamTrack.stop.bind(
+    fixture.track.mediaStreamTrack,
+  );
+  vi.spyOn(fixture.track.mediaStreamTrack, "stop").mockImplementation(() => {
+    stop();
+    clock.mockReturnValue(2500);
+  });
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(acquire).not.toHaveBeenCalled();
+});
+
 it("checks the deadline after waiting for the track change lock", async () => {
   const fixture = await busyForeground("audio");
   const unlock = await fixture.track.trackChangeLock.lock();
