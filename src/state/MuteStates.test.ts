@@ -123,6 +123,51 @@ describe("MuteState", () => {
     expect(mute.syncing$.value).toBe(false);
   });
 
+  test("applies a pending lobby choice through the newly installed call handler", async () => {
+    const device = {
+      available$: constant(new Map([["mic", "Microphone"]])),
+      selected$: constant(undefined),
+      select: vi.fn(),
+    };
+    const mute = new MuteState(testScope, device, false, constant(false));
+    mute.setEnabled$.value?.(true);
+    const handler = vi.fn(async (desired: boolean) => Promise.resolve(desired));
+    mute.setHandler(handler);
+    await flushPromises();
+    expect(handler).toHaveBeenCalledExactlyOnceWith(true);
+    expect(mute.enabled$.value).toBe(true);
+  });
+
+  test.each([false, true])(
+    "reapplies off when an older capture rejects after changing the device (forced %s)",
+    async (forced) => {
+      const device = {
+        available$: constant(new Map([["mic", "Microphone"]])),
+        selected$: constant(undefined),
+        select: vi.fn(),
+      };
+      const force$ = new BehaviorSubject(false);
+      const mute = new MuteState(testScope, device, false, force$);
+      const pending = Promise.withResolvers<void>();
+      let capturing = false;
+      mute.setHandler(async (enabled) => {
+        if (enabled) await pending.promise;
+        capturing = enabled;
+        if (enabled) throw new Error("failed after enabling the device");
+        return capturing;
+      });
+      mute.setEnabled$.value?.(true);
+      mute.setEnabled$.value?.(false);
+      if (forced) force$.next(true);
+      await flushPromises();
+      pending.resolve();
+      await flushPromises();
+      expect(capturing).toBe(false);
+      expect(mute.enabled$.value).toBe(false);
+      expect(mute.syncing$.value).toBe(false);
+    },
+  );
+
   test("keeps the microphone off when its input disappears and returns", async () => {
     const input = new Map<string, DeviceLabel>([
       ["mic", { type: "name", name: "Microphone" }],
@@ -134,7 +179,7 @@ describe("MuteState", () => {
       true,
       constant(false),
     );
-    const handler = vi.fn(async (enabled: boolean) => enabled);
+    const handler = vi.fn(async (enabled: boolean) => Promise.resolve(enabled));
     mute.setHandler(handler);
     mute.setEnabled$.value?.(false);
     await flushPromises();

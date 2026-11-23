@@ -148,7 +148,7 @@ test.each(["rejected", "pending"])(
     const pending = Promise.withResolvers<void>();
     context.resume
       .mockClear()
-      .mockImplementationOnce(() =>
+      .mockImplementationOnce(async () =>
         failure === "pending"
           ? pending.promise
           : Promise.reject(new Error("busy")),
@@ -179,7 +179,7 @@ test("bounds pending resumes across graph release and reacquisition", async () =
   const call = setup(2);
   const context = Context.instances[0];
   const pending = Promise.withResolvers<void>();
-  context.resume.mockClear().mockImplementation(() => pending.promise);
+  context.resume.mockClear().mockImplementation(async () => pending.promise);
   context.state = "suspended";
   context.dispatchEvent(new Event("statechange"));
   await vi.advanceTimersByTimeAsync(1000);

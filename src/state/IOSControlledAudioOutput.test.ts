@@ -204,7 +204,7 @@ describe("Explicit selection", () => {
       { audioEnabled: false, videoEnabled: true },
       nullHostBridge,
     );
-    const handler = vi.fn(async (enabled: boolean) => enabled);
+    const handler = vi.fn(async (enabled: boolean) => Promise.resolve(enabled));
     mute.video.setHandler(handler);
     mute.video.setEnabled$.value?.(false);
     await flushPromises();
