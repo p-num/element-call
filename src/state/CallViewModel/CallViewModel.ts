@@ -81,7 +81,7 @@ import {
 import { shallowEquals as shallowArrayEquals } from "../../utils/array";
 import { shallowEquals as shallowObjectEquals } from "../../utils/object";
 import { type MediaDevice, type MediaDevices } from "../MediaDevices";
-import { type Handler, type MuteStates } from "../MuteStates";
+import { type MuteStates } from "../MuteStates";
 import { HeaderStyle, type UrlParams } from "../../UrlParams";
 import { type HostBridge, nullHostBridge } from "../../HostBridge";
 import { handleHostHangup } from "./HostHangup";
@@ -505,27 +505,14 @@ export function createCallViewModel$(
     "screenShare",
   ) as Behavior<LocalVideoMediaTrack | undefined>;
 
-  // The mute switches drive our tracks, which report back what the device
-  // allowed, so a denied permission flips the switch back. A source is muted
-  // and unmuted while its track exists and published when it does not.
   const followMuteState = (
-    muteState: {
-      setHandler: (handler: Handler) => void;
-      enabled$: Behavior<boolean>;
-    },
+    muteState: Pick<MuteStates["audio"], "setHandler" | "allowsEnabledTrack">,
     track$: Behavior<LocalMediaTrack | undefined>,
     source: "microphone" | "camera",
   ): void => {
-    // What the switch asks for, ahead of what it shows: the switch follows
-    // only once the handler has resolved
-    let desired = muteState.enabled$.value;
     muteState.setHandler(async (enabled) => {
-      desired = enabled;
       const track = track$.value;
-      if (track !== undefined) {
-        desired = await track.setEnabled(enabled);
-        return desired;
-      }
+      if (track !== undefined) return track.setEnabled(enabled);
       if (!enabled) return false;
       try {
         await rtcParticipation.publish(
@@ -534,13 +521,11 @@ export function createCallViewModel$(
         return true;
       } catch (e) {
         logger.error(`Failed to publish the ${source}`, e);
-        desired = false;
         return false;
       }
     });
-    // A track that arrives after its switch was flipped off catches up with it
     track$.pipe(scope.bind()).subscribe((track) => {
-      if (track !== undefined && !desired)
+      if (track !== undefined && !muteState.allowsEnabledTrack)
         track.setEnabled(false).catch((e) => {
           logger.error(`Failed to mute the ${source}`, e);
         });
