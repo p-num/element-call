@@ -39,7 +39,7 @@ it.each(["rejected", "mismatched"])(
       "h264",
       backup.getParameters().encodings,
     );
-    sc.sender = backup;
+    await track.setSimulcastTrackSender("h264", backup);
     await swap(large);
     const old = primary.encodings.at(-1).maxBitrate;
     if (failure === "rejected")
@@ -59,8 +59,8 @@ it.each(["rejected", "mismatched"])(
 it("refreshes the backup after a rejected primary and retries the same dimensions", async () => {
   const { track, primary, swap } = await publishedCamera();
   const backup = sender(layers(3));
-  track.addSimulcastTrack("h264", backup.getParameters().encodings).sender =
-    backup;
+  track.addSimulcastTrack("h264", backup.getParameters().encodings);
+  await track.setSimulcastTrackSender("h264", backup);
   primary.setParameters.mockRejectedValueOnce(new Error("busy"));
   await swap(large);
   expect(backup.encodings[0].maxBitrate).toBeGreaterThan(1);
@@ -109,8 +109,8 @@ it.each(["primary", "backup"])(
     const { track, primary, swap } = await publishedCamera();
     track.codec = "vp8";
     const backup = sender(layers(3));
-    track.addSimulcastTrack("h264", backup.getParameters().encodings).sender =
-      backup;
+    track.addSimulcastTrack("h264", backup.getParameters().encodings);
+    await track.setSimulcastTrackSender("h264", backup);
     const selected = target === "primary" ? primary : backup;
     selected.encodings.at(-1).active = false;
     await swap(large);
@@ -142,8 +142,8 @@ it.each(["primary", "backup"])(
 it("uses the same dimensions for both senders while other camera replacements queue", async () => {
   const { track, primary, swap } = await publishedCamera();
   const backup = sender(layers(3));
-  track.addSimulcastTrack("h264", backup.getParameters().encodings).sender =
-    backup;
+  track.addSimulcastTrack("h264", backup.getParameters().encodings);
+  await track.setSimulcastTrackSender("h264", backup);
   const primaryWrite = deferWrite(primary);
   const backupWrite = deferWrite(backup);
   const hd = { width: 1920, height: 1080 };
@@ -182,6 +182,7 @@ async function publishedCamera() {
   const primary = sender(layers(3));
   track.source = Track.Source.Camera;
   track.sender = primary;
+  await new Promise((resolve) => setTimeout(resolve, 0));
   track.publishOptions = {
     simulcast: true,
     videoCodec: "vp8",
