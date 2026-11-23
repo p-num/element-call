@@ -169,6 +169,20 @@ describe("Publisher", () => {
       expect(track(Track.Source.Camera)!.isUpstreamPaused).toBe(false);
     });
 
+    it("acquires the publisher hold while the browser already has the upstream paused", async () => {
+      want(camera);
+      publisher.start();
+      await flushPromises();
+      await publisher.startPublishing();
+      const cameraTrack = track(Track.Source.Camera)!;
+      await cameraTrack.pauseUpstream();
+      vi.mocked(cameraTrack.pauseUpstream).mockClear();
+
+      await publisher.stopPublishing();
+
+      expect(cameraTrack.pauseUpstream).toHaveBeenCalledOnce();
+    });
+
     it("pauses the upstream again when the member stops publishing", async () => {
       want(camera);
       publisher.start();

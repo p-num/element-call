@@ -60,3 +60,5 @@ overrides:
   # - https://github.com/element-hq/element-call/security/dependabot/195
   # - https://github.com/element-hq/element-call/security/dependabot/193
   "dompurify": "^3.4.11"
+patchedDependencies:
+  livekit-client@2.23.0: patches/livekit-client@2.23.0.patch
