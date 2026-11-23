@@ -24,60 +24,16 @@ import {
 
 type Transport = ReturnType<typeof makeFetchTransport>;
 type Envelope = Parameters<Transport["send"]>[0];
-type EventEnvelope = Extract<Envelope, [{ event_id: string }, unknown[]]>;
 type Client = NonNullable<ReturnType<typeof getClient>>;
 type EventType = "event" | "transaction";
-type CapturedEvent = {
-  type: EventType;
-  generation: number;
-  diagnostics?: DiagnosticAttachment;
-};
-type DiagnosticAttachment = {
-  eventId: string;
-  contents: string;
-  length: number;
-};
-type RequestDiagnostics = (
-  eventId: string,
-  timestamp: number,
-) => Promise<unknown> | null;
-
-declare global {
-  interface Window {
-    __letroCallAudioDiagnostics?: {
-      sentryAttachment?: RequestDiagnostics;
-    };
-  }
-}
-
-export function iosSentryDiagnosticRequest(): RequestDiagnostics | undefined {
-  if (import.meta.env.VITE_IOS_SENTRY_ATTACHMENTS !== "true") return undefined;
-  const property = Object.getOwnPropertyDescriptor(
-    window,
-    "__letroCallAudioDiagnostics",
-  );
-  if (property?.configurable !== false || property.writable !== false)
-    return undefined;
-  const bridge = window.__letroCallAudioDiagnostics;
-  return Object.isFrozen(bridge) &&
-    typeof bridge?.sentryAttachment === "function"
-    ? bridge.sentryAttachment
-    : undefined;
-}
+type CaptureConsent = { type: EventType; generation: number };
 
 export function createEmbeddedSentryReporting(
   delegateTransport: typeof makeFetchTransport,
   metadata: Pick<Event, "environment" | "release">,
-  diagnostics?: {
-    request: RequestDiagnostics;
-    fetch?: typeof globalThis.fetch;
-  },
 ) {
-  const sendRequest = diagnostics
-    ? (diagnostics.fetch ?? window.fetch?.bind(window))
-    : undefined;
-  const captured = new WeakMap<EventHint, CapturedEvent>();
-  const dispatchable = new WeakMap<object, CapturedEvent>();
+  const captured = new WeakMap<EventHint, CaptureConsent>();
+  const dispatchable = new WeakMap<object, CaptureConsent>();
   const integration = {
     name: "ElementCallEmbeddedConsent",
     setup(client: Client): void {
@@ -89,28 +45,6 @@ export function createEmbeddedSentryReporting(
         const generation = currentConsentGeneration(type);
         if (generation !== undefined) captured.set(hint, { type, generation });
       });
-      client.addEventProcessor((event, hint): Event | PromiseLike<Event> => {
-        const capture = captured.get(hint);
-        const { event_id: eventId, timestamp } = event;
-        if (
-          capture?.type !== "event" ||
-          capture.generation !== currentConsentGeneration("event") ||
-          !diagnostics ||
-          !sendRequest ||
-          !isError(event) ||
-          !validEventId(eventId) ||
-          typeof timestamp !== "number" ||
-          !Number.isFinite(timestamp)
-        )
-          return event;
-        // Keep the bridge deadline inside Sentry's event processing so flush waits for it.
-        return readDiagnostics(eventId, async () =>
-          diagnostics.request(eventId, timestamp),
-        ).then((diagnostics) => {
-          capture.diagnostics = diagnostics;
-          return event;
-        });
-      });
       client.on("beforeSendEvent", (event, hint) => {
         if (!hint) return;
         const consent = captured.get(hint);
@@ -121,21 +55,10 @@ export function createEmbeddedSentryReporting(
     },
   };
   const transport: typeof makeFetchTransport = (options) => {
-    const delegate = delegateTransport(
-      {
-        ...options,
-        fetchOptions: {
-          ...options.fetchOptions,
-          referrerPolicy: "no-referrer",
-        },
-      },
-      sendRequest &&
-        (async (input, init) => {
-          // Sentry can rate-limit the error independently from its attachment.
-          if (!startsWithEvent(init?.body)) return new Response(null);
-          return sendRequest(input, init);
-        }),
-    );
+    const delegate = delegateTransport({
+      ...options,
+      fetchOptions: { ...options.fetchOptions, referrerPolicy: "no-referrer" },
+    });
     return {
       send: async (envelope) => {
         const safe = safeEnvelope(envelope, metadata, dispatchable);
@@ -160,11 +83,14 @@ function currentConsentGeneration(type: string): number | undefined {
 function safeEnvelope(
   [header, items]: Envelope,
   metadata: Pick<Event, "environment" | "release">,
-  dispatchable: WeakMap<object, CapturedEvent>,
-): EventEnvelope | undefined {
-  if (!validEventId(header.event_id)) return undefined;
-  const events: EventEnvelope[1] = [];
-  let diagnostics: DiagnosticAttachment | undefined;
+  dispatchable: WeakMap<object, CaptureConsent>,
+): Envelope | undefined {
+  if (
+    typeof header.event_id !== "string" ||
+    !/^[0-9a-f]{32}$/i.test(header.event_id)
+  )
+    return undefined;
+  const events: [{ type: "event" | "transaction" }, Event][] = [];
   for (const [item, payload] of items) {
     if (payload === null || typeof payload !== "object") continue;
     const consent = dispatchable.get(payload);
@@ -173,7 +99,7 @@ function safeEnvelope(
       consent?.type === item.type &&
       consent.generation === currentConsentGeneration(item.type) &&
       (payload as Event).event_id === header.event_id
-    ) {
+    )
       events.push([
         { type: item.type },
         safeEvent(payload as Event, {
@@ -183,91 +109,12 @@ function safeEnvelope(
           type: item.type === "transaction" ? "transaction" : undefined,
         }),
       ]);
-      if (
-        item.type === "event" &&
-        consent.diagnostics?.eventId === header.event_id
-      )
-        diagnostics ??= consent.diagnostics;
-    }
   }
   if (events.length === 0) return undefined;
-  if (diagnostics && events.length === 1)
-    events.push([
-      {
-        type: "attachment",
-        filename: "letro-diagnostics.json",
-        content_type: "application/json",
-        attachment_type: "event.attachment",
-        length: diagnostics.length,
-      },
-      diagnostics.contents,
-    ]);
   return [
     { event_id: header.event_id, sent_at: new Date().toISOString() },
     events,
   ];
-}
-
-function validEventId(id: unknown): id is string {
-  return typeof id === "string" && /^[0-9a-f]{32}$/i.test(id);
-}
-
-function startsWithEvent(body: RequestInit["body"]): boolean {
-  if (typeof body !== "string") return false;
-  const start = body.indexOf("\n") + 1;
-  const end = body.indexOf("\n", start);
-  if (start === 0 || end < start) return false;
-  try {
-    const first: unknown = JSON.parse(body.slice(start, end));
-    return (
-      typeof first === "object" &&
-      first !== null &&
-      "type" in first &&
-      (first.type === "event" || first.type === "transaction")
-    );
-  } catch {
-    return false;
-  }
-}
-
-function isError({ level, exception }: Event): boolean {
-  return (
-    level === "error" || level === "fatal" || Boolean(exception?.values?.length)
-  );
-}
-
-async function readDiagnostics(
-  eventId: string,
-  request: () => unknown,
-): Promise<DiagnosticAttachment | undefined> {
-  const limit = 32 * 1024;
-  let deadline: ReturnType<typeof setTimeout> | undefined;
-  try {
-    const result = await Promise.race([
-      request(),
-      new Promise<null>((resolve) => {
-        deadline = setTimeout(() => resolve(null), 250);
-      }),
-    ]);
-    if (typeof result !== "string" || !result.length || result.length > limit)
-      return undefined;
-    const value: unknown = JSON.parse(result);
-    if (
-      typeof value !== "object" ||
-      value === null ||
-      !("schema" in value && value.schema === 1 && "entries" in value) ||
-      !Array.isArray(value.entries) ||
-      value.entries.length === 0 ||
-      value.entries.length > 64
-    )
-      return undefined;
-    const length = new TextEncoder().encode(result).byteLength;
-    return length <= limit ? { eventId, contents: result, length } : undefined;
-  } catch {
-    return undefined;
-  } finally {
-    clearTimeout(deadline);
-  }
 }
 
 function safeEvent(
