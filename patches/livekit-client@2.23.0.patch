@@ -1,5 +1,5 @@
 diff --git a/dist/livekit-client.esm.mjs b/dist/livekit-client.esm.mjs
-index c7cfff9..0315b5e 100644
+index c7cfff9..9eab452 100644
 --- a/dist/livekit-client.esm.mjs
 +++ b/dist/livekit-client.esm.mjs
 @@ -22974,4 +22974,5 @@ class LocalTrack extends Track {
@@ -31,13 +31,23 @@ index c7cfff9..0315b5e 100644
 +    return this.pauseReasons.size > 0;
    }
    get isUserProvided() {
-@@ -23071,75 +23072,73 @@ class LocalTrack extends Track {
+@@ -23058,6 +23059,6 @@ class LocalTrack extends Track {
+   }
+   get mediaStreamTrack() {
+-    var _a, _b;
+-    return (_b = (_a = this.processor) === null || _a === void 0 ? void 0 : _a.processedTrack) !== null && _b !== void 0 ? _b : this._mediaStreamTrack;
++    const output = this.processor?.processedTrack;
++    return output && output !== this.discardedProcessorOutput ? output : this._mediaStreamTrack;
+   }
+   get isLocal() {
+@@ -23071,44 +23072,33 @@ class LocalTrack extends Track {
      return this._mediaStreamTrack.getSettings();
    }
 -  setMediaStreamTrack(newTrack, force, isUnmuting) {
 -    return __awaiter(this, void 0, void 0, function* () {
 -      var _a;
 -      if (newTrack === this._mediaStreamTrack && !force) {
+-        return;
 +  async setMediaStreamTrack(newTrack, force, isUnmuting, recovery) {
 +    if (newTrack === this._mediaStreamTrack && !force) {
 +      return;
@@ -53,35 +63,11 @@ index c7cfff9..0315b5e 100644
 +      this._mediaStreamTrack.removeEventListener('unmute', this.handleTrackUnmuteEvent);
 +    }
 +    let processedTrack;
-+    if (this.processor && newTrack) {
++    const processor = this.processor;
++    if (processor && newTrack) {
 +      this.log.debug('restarting processor', this.logContext);
 +      if (this.kind === 'unknown') {
 +        throw TypeError('cannot set processor on track of unknown kind');
-+      }
-+      if (this.processorElement) {
-+        attachToElement(newTrack, this.processorElement);
-+        // ensure the processorElement itself stays muted
-+        this.processorElement.muted = true;
-+      }
-+      await this.processor.restart({
-+        track: newTrack,
-+        kind: this.kind,
-+        element: this.processorElement,
-+        // audio processors need the context they were initialised with in order to rebuild
-+        // their graph, omitting it here would leave them without one
-+        audioContext: this.audioContext,
-+        localTrack: this,
-+      });
-+      processedTrack = this.processor.processedTrack;
-+    }
-+    await this.withUpstreamLock(async () => {
-+      if (recovery && !recovery.current())
-         return;
-+      const outgoing = processedTrack ?? newTrack;
-+      const held = this.pauseReasons.has('caller');
-+      newTrack.enabled = isUnmuting || !this.isMuted;
-+      if (!held && this.sender && this.sender.transport?.state !== 'closed') {
-+        await this.sender.replaceTrack(outgoing);
        }
 -      if (this._mediaStreamTrack) {
 -        // detach
@@ -92,7 +78,11 @@ index c7cfff9..0315b5e 100644
 -        this._mediaStreamTrack.removeEventListener('ended', this.handleEnded);
 -        this._mediaStreamTrack.removeEventListener('mute', this.handleTrackMuteEvent);
 -        this._mediaStreamTrack.removeEventListener('unmute', this.handleTrackUnmuteEvent);
--      }
++      if (this.processorElement) {
++        attachToElement(newTrack, this.processorElement);
++        // ensure the processorElement itself stays muted
++        this.processorElement.muted = true;
+       }
 -      this.mediaStream = new MediaStream([newTrack]);
 -      if (newTrack) {
 -        newTrack.addEventListener('ended', this.handleEnded);
@@ -117,25 +107,44 @@ index c7cfff9..0315b5e 100644
 -          this.processorElement.muted = true;
 -        }
 -        yield this.processor.restart({
--          track: newTrack,
--          kind: this.kind,
--          element: this.processorElement,
--          // audio processors need the context they were initialised with in order to rebuild
--          // their graph, omitting it here would leave them without one
--          audioContext: this.audioContext,
++      const previousOutput = processor.processedTrack;
++      try {
++        await processor.restart({
+           track: newTrack,
+           kind: this.kind,
+@@ -23117,29 +23107,49 @@ class LocalTrack extends Track {
+           // their graph, omitting it here would leave them without one
+           audioContext: this.audioContext,
 -          localTrack: this
--        });
++          localTrack: this,
+         });
 -        processedTrack = this.processor.processedTrack;
--      }
+       }
 -      if (this.sender && ((_a = this.sender.transport) === null || _a === void 0 ? void 0 : _a.state) !== 'closed') {
 -        yield this.sender.replaceTrack(processedTrack !== null && processedTrack !== void 0 ? processedTrack : newTrack);
--      }
++      finally {
++        processedTrack = processor.processedTrack;
++        if (recovery && processedTrack && processedTrack !== previousOutput &&
++          (this.processor === processor || processedTrack !== this.processor?.processedTrack)) {
++          recovery.candidates.add(processedTrack);
++        }
++      }
++    }
++    await this.withUpstreamLock(async () => {
++      if (recovery && !recovery.candidatesAreLive())
++        return;
++      const outgoing = processedTrack ?? newTrack;
++      const held = this.pauseReasons.has('caller');
++      newTrack.enabled = isUnmuting || !this.isMuted;
++      if (!held && this.sender && this.sender.transport?.state !== 'closed') {
++        await this.sender.replaceTrack(outgoing);
+       }
 -      // if `newTrack` is different from the existing track, stop the
 -      // older track just before replacing it
-+      if (recovery && !recovery.current())
++      if (recovery && !recovery.candidatesAreLive())
 +        return;
 +      await this.updateBackupTracks(!held, outgoing, recovery);
-+      if (recovery && !recovery.current())
++      if (recovery && !recovery.candidatesAreLive())
 +        return;
        if (!this.providedByUser && this._mediaStreamTrack !== newTrack) {
          this._mediaStreamTrack.stop();
@@ -150,6 +159,7 @@ index c7cfff9..0315b5e 100644
 -        this.attachedElements.forEach(el => {
 -          attachToElement(processedTrack !== null && processedTrack !== void 0 ? processedTrack : newTrack, el);
 -        });
++      this.discardedProcessorOutput = undefined;
 +      newTrack.enabled = isUnmuting || !this.isMuted;
 +      this.mediaStream = new MediaStream([newTrack]);
 +      newTrack.addEventListener('ended', this.handleEnded);
@@ -168,13 +178,13 @@ index c7cfff9..0315b5e 100644
 +      await this.onMediaStreamTrackChanged();
    }
    /**
-@@ -23237,4 +23236,5 @@ class LocalTrack extends Track {
+@@ -23237,4 +23247,5 @@ class LocalTrack extends Track {
    }
    replaceTrack(track, userProvidedOrOptions) {
 +    this.cancelCaptureRecovery();
      return __awaiter(this, void 0, void 0, function* () {
        const unlock = yield this.trackChangeLock.lock();
-@@ -23278,83 +23278,147 @@ class LocalTrack extends Track {
+@@ -23278,83 +23289,159 @@ class LocalTrack extends Track {
      });
    }
 -  restart(constraints, isUnmuting) {
@@ -296,9 +306,11 @@ index c7cfff9..0315b5e 100644
 +        if (recovery && !recovery.current())
 +          return;
 +        recovery?.candidates.add(newTrack);
++        if (recovery && !recovery.candidatesAreLive())
++          return;
 +        if (this.kind === Track.Kind.Video)
 +          await newTrack.applyConstraints(otherConstraints);
-+        if (recovery && !recovery.current())
++        if (recovery && !recovery.candidatesAreLive())
 +          return;
 +        await this.setMediaStreamTrack(newTrack, false, isUnmuting, recovery);
 +        if (this._mediaStreamTrack !== newTrack)
@@ -306,9 +318,7 @@ index c7cfff9..0315b5e 100644
 +      }
 +      finally {
 +        if (recovery && this._mediaStreamTrack !== newTrack) {
-+          for (const candidate of recovery.candidates)
-+            candidate.stop();
-+          recovery.candidates.clear();
++          this.discardCaptureCandidates(recovery);
          }
 -        unlock();
 +        if (this._mediaStreamTrack !== newTrack && newTrack.readyState !== 'ended')
@@ -352,6 +362,8 @@ index c7cfff9..0315b5e 100644
 +      candidates: new Set(),
 +      current: () => this.pendingRecovery === recovery && capture === this._mediaStreamTrack &&
 +        sender === this.sender && !this.isMuted && !this.isStopped && !this.isUserProvided && isPublished(),
++      candidatesAreLive: () => recovery.current() &&
++        Array.from(recovery.candidates).every(candidate => candidate.readyState === 'live'),
 +      retry: () => {
 +        if (!recovery.current()) {
 +          if (this.pendingRecovery === recovery)
@@ -379,13 +391,23 @@ index c7cfff9..0315b5e 100644
 +    if (!recovery)
 +      return;
 +    this.pendingRecovery = undefined;
-+    if (!adopted)
-+      for (const track of recovery.candidates)
-+        track.stop();
-+    recovery.candidates.clear();
++    if (adopted)
++      recovery.candidates.clear();
++    else
++      this.discardCaptureCandidates(recovery);
 +    recovery.controller.abort();
 +    if (this.kind !== Track.Kind.Video || !this.attachedElements.length)
 +      super.removeAppVisibilityListener();
++  }
++  discardCaptureCandidates(recovery) {
++    const output = this.processor?.processedTrack;
++    if (output && recovery.candidates.has(output))
++      this.discardedProcessorOutput = output;
++    for (const candidate of recovery.candidates) {
++      if (candidate.readyState !== 'ended')
++        candidate.stop();
++    }
++    recovery.candidates.clear();
 +  }
 +  removeAppVisibilityListener() {
 +    if (!this.pendingRecovery)
@@ -395,7 +417,7 @@ index c7cfff9..0315b5e 100644
 +    if (muted) this.cancelCaptureRecovery();
      this.log.debug("setting ".concat(this.kind, " track ").concat(muted ? 'muted' : 'unmuted'), this.logContext);
      if (this.isMuted === muted && this._mediaStreamTrack.enabled !== muted) {
-@@ -23368,23 +23432,22 @@ class LocalTrack extends Track {
+@@ -23368,23 +23455,22 @@ class LocalTrack extends Track {
      return this._mediaStreamTrack.readyState !== 'live' || this._mediaStreamTrack.muted || !this._mediaStreamTrack.enabled || this.reacquireTrack;
    }
 -  handleAppVisibilityChanged() {
@@ -434,7 +456,7 @@ index c7cfff9..0315b5e 100644
 +    this.debouncedTrackMuteHandler.cancel('stop');
      this.manuallyStopped = true;
      super.stop();
-@@ -23407,51 +23470,46 @@ class LocalTrack extends Track {
+@@ -23407,51 +23493,46 @@ class LocalTrack extends Track {
     * this API is unsupported on Safari < 12 due to a bug
     **/
 -  pauseUpstream() {
@@ -482,10 +504,10 @@ index c7cfff9..0315b5e 100644
 +      const browser = getBrowser();
 +      if (paused && browser?.name === 'Safari' && compareVersions(browser.version, '12.0') < 0) {
 +        throw new DeviceUnsupportedError('pauseUpstream is not supported on Safari < 12.');
-       }
++      }
 +      if (this.sender.transport?.state !== 'closed') {
 +        await this.sender.replaceTrack(paused ? null : this.mediaStreamTrack);
-+      }
+       }
 +      await this.updateBackupTracks(!paused);
      });
    }
@@ -525,14 +547,14 @@ index c7cfff9..0315b5e 100644
 +        await sender.replaceTrack(track);
        }
      });
-@@ -23541,5 +23599,5 @@ class LocalTrack extends Track {
+@@ -23541,5 +23622,5 @@ class LocalTrack extends Track {
                }
              }
 -            yield (_a = _this3.sender) === null || _a === void 0 ? void 0 : _a.replaceTrack(_this3.processor.processedTrack);
 +            yield _this3.bindProcessorTrack(_this3.sender, _this3.processor.processedTrack);
            }
            _this3.emit(TrackEvent.TrackProcessorUpdate, _this3.processor);
-@@ -23780,15 +23838,9 @@ class LocalTrack extends Track {
+@@ -23780,15 +23861,9 @@ class LocalTrack extends Track {
      });
    }
 -  restart(constraints, isUnmuting) {
@@ -552,35 +574,35 @@ index c7cfff9..0315b5e 100644
 +    return track;
    }
    /* @internal */
-@@ -23858,5 +23910,5 @@ class LocalTrack extends Track {
+@@ -23858,5 +23933,5 @@ class LocalTrack extends Track {
          this.processor = processor;
          if (this.processor.processedTrack) {
 -          yield (_a = this.sender) === null || _a === void 0 ? void 0 : _a.replaceTrack(this.processor.processedTrack);
 +          yield this.bindProcessorTrack(this.sender, this.processor.processedTrack);
            this.observeProcessedTrack(this.processor.processedTrack);
          }
-@@ -23926,5 +23978,5 @@ class LocalTrack extends Track {
+@@ -23926,5 +24001,5 @@ class LocalTrack extends Track {
          });
          if (this.processor.processedTrack) {
 -          yield (_a = this.sender) === null || _a === void 0 ? void 0 : _a.replaceTrack(this.processor.processedTrack);
 +          yield this.bindProcessorTrack(this.sender, this.processor.processedTrack);
            this.observeProcessedTrack(this.processor.processedTrack);
          }
-@@ -24149,5 +24201,5 @@ function computeStartTargetBitrate(codec, options, encodings) {
+@@ -24149,5 +24224,5 @@ function computeStartTargetBitrate(codec, options, encodings) {
    }, 0);
  }
 -function computeTrackBackupEncodings(track, videoCodec, opts) {
 +function computeTrackBackupEncodings(track, videoCodec, opts, dimensions) {
    var _a, _b, _c, _d;
    // backupCodec should not be true anymore, default codec is set in LocalParticipant.publish
-@@ -24165,5 +24217,5 @@ function computeTrackBackupEncodings(track, videoCodec, opts) {
+@@ -24165,5 +24240,5 @@ function computeTrackBackupEncodings(track, videoCodec, opts) {
    // use backup encoding setting as videoEncoding for backup codec publishing
    opts.videoEncoding = opts.backupCodec.encoding;
 -  const settings = track.mediaStreamTrack.getSettings();
 +  const settings = dimensions ?? track.mediaStreamTrack.getSettings();
    const width = (_a = settings.width) !== null && _a !== void 0 ? _a : (_b = track.dimensions) === null || _b === void 0 ? void 0 : _b.width;
    const height = (_c = settings.height) !== null && _c !== void 0 ? _c : (_d = track.dimensions) === null || _d === void 0 ? void 0 : _d.height;
-@@ -24349,5 +24401,9 @@ class LocalVideoTrack extends LocalTrack {
+@@ -24349,5 +24424,9 @@ class LocalVideoTrack extends LocalTrack {
    }
    set sender(sender) {
 -    this._sender = sender;
@@ -591,13 +613,13 @@ index c7cfff9..0315b5e 100644
 +    super.sender = sender;
      if (this.degradationPreference) {
        this.setDegradationPreference(this.degradationPreference);
-@@ -24365,4 +24421,5 @@ class LocalVideoTrack extends LocalTrack {
+@@ -24365,4 +24444,5 @@ class LocalVideoTrack extends LocalTrack {
      super(mediaTrack, Track.Kind.Video, constraints, userProvidedTrack, loggerOptions);
      /* @internal */
 +    this.senderRevision = 0;
      this.simulcastCodecs = new Map();
      this.degradationPreference = 'balanced';
-@@ -24437,64 +24494,31 @@ class LocalVideoTrack extends LocalTrack {
+@@ -24437,64 +24517,31 @@ class LocalVideoTrack extends LocalTrack {
      super.stop();
    }
 -  pauseUpstream() {
@@ -612,7 +634,7 @@ index c7cfff9..0315b5e 100644
 -      yield _super.pauseUpstream.call(this);
 +  async updateBackupTracks(sending, replacement, recovery) {
 +    for (const sc of this.simulcastCodecs.values()) {
-+      if (recovery && !recovery.current())
++      if (recovery && !recovery.candidatesAreLive())
 +        return;
 +      if (sc.sender?.transport?.state === 'closed')
 +        continue;
@@ -637,7 +659,7 @@ index c7cfff9..0315b5e 100644
 -          if (!_e && !_a && (_b = _f.return)) yield _b.call(_f);
 -        } finally {
 -          if (e_1) throw e_1.error;
-+        if (recovery && !recovery.current())
++        if (recovery && !recovery.candidatesAreLive())
 +          return;
 +        if (next) {
 +          sc.mediaStreamTrack.stop();
@@ -650,7 +672,10 @@ index c7cfff9..0315b5e 100644
 -    const _super = Object.create(null, {
 -      resumeUpstream: {
 -        get: () => super.resumeUpstream
--      }
++      finally {
++        if (next && sc.mediaStreamTrack !== next && next.readyState !== 'ended')
++          next.stop();
+       }
 -    });
 -    return __awaiter(this, void 0, void 0, function* () {
 -      var _a, e_2, _b, _c;
@@ -673,17 +698,14 @@ index c7cfff9..0315b5e 100644
 -        } finally {
 -          if (e_2) throw e_2.error;
 -        }
-+      finally {
-+        if (next && sc.mediaStreamTrack !== next && next.readyState !== 'ended')
-+          next.stop();
-       }
+-      }
 -    });
 +    }
    }
 +  
    mute() {
      const _super = Object.create(null, {
-@@ -24621,48 +24645,18 @@ class LocalVideoTrack extends LocalTrack {
+@@ -24621,48 +24668,18 @@ class LocalVideoTrack extends LocalTrack {
      this.setPublishingLayers(this.isSvcPublish(this.codec), qualities);
    }
 -  restartTrack(options) {
@@ -698,7 +720,13 @@ index c7cfff9..0315b5e 100644
 -        if (typeof streamConstraints.video !== 'boolean') {
 -          constraints = streamConstraints.video;
 -        }
--      }
++  async restartTrack(options) {
++    let constraints;
++    if (options) {
++      const streamConstraints = constraintsForOptions({ video: options });
++      if (typeof streamConstraints.video !== 'boolean') {
++        constraints = streamConstraints.video;
+       }
 -      yield this.restart(constraints);
 -      // reset cpu constrained state after track is restarted
 -      this.isCpuConstrained = false;
@@ -722,13 +750,7 @@ index c7cfff9..0315b5e 100644
 -        } finally {
 -          if (e_3) throw e_3.error;
 -        }
-+  async restartTrack(options) {
-+    let constraints;
-+    if (options) {
-+      const streamConstraints = constraintsForOptions({ video: options });
-+      if (typeof streamConstraints.video !== 'boolean') {
-+        constraints = streamConstraints.video;
-       }
+-      }
 -      // The new MediaStreamTrack may have different dimensions than the previous one
 -      // (e.g. switching between cameras with different native resolutions), which would
 -      // leave the sender's encoding parameters (scaleResolutionDownBy, maxBitrate, etc.)
@@ -745,14 +767,14 @@ index c7cfff9..0315b5e 100644
 +    await this.onSenderTrackSwapped();
    }
    onSenderTrackSwapped() {
-@@ -24685,4 +24679,6 @@ class LocalVideoTrack extends LocalTrack {
+@@ -24685,4 +24702,6 @@ class LocalVideoTrack extends LocalTrack {
        const unlock = yield this.senderLock.lock();
        try {
 +        const capture = this._mediaStreamTrack;
 +        const output = this.mediaStreamTrack;
          let dims;
          try {
-@@ -24694,12 +24690,19 @@ class LocalVideoTrack extends LocalTrack {
+@@ -24694,12 +24713,19 @@ class LocalVideoTrack extends LocalTrack {
            return;
          }
 -        if (this.lastEncodedDimensions && this.lastEncodedDimensions.width === dims.width && this.lastEncodedDimensions.height === dims.height) {
@@ -776,7 +798,7 @@ index c7cfff9..0315b5e 100644
 +        }
          for (const _ref of this.simulcastCodecs) {
            var _ref2 = _slicedToArray(_ref, 2);
-@@ -24713,10 +24716,19 @@ class LocalVideoTrack extends LocalTrack {
+@@ -24713,10 +24739,19 @@ class LocalVideoTrack extends LocalTrack {
            }
            const backupOpts = Object.assign({}, this.publishOptions);
 -          const backupEncodings = computeTrackBackupEncodings(this, codec, backupOpts);
@@ -799,14 +821,14 @@ index c7cfff9..0315b5e 100644
 +          this.lastEncodedDimensions = dims;
          }
        } catch (e) {
-@@ -24733,5 +24745,5 @@ class LocalVideoTrack extends LocalTrack {
+@@ -24733,5 +24768,5 @@ class LocalVideoTrack extends LocalTrack {
        const params = sender.getParameters();
        if (!params.encodings || params.encodings.length !== encodings.length) {
 -        return;
 +        return false;
        }
        params.encodings.forEach((existing, idx) => {
-@@ -24760,5 +24772,11 @@ class LocalVideoTrack extends LocalTrack {
+@@ -24760,5 +24795,11 @@ class LocalVideoTrack extends LocalTrack {
          encodings: params.encodings
        }));
 -      yield sender.setParameters(params);
@@ -819,21 +841,21 @@ index c7cfff9..0315b5e 100644
 +        }
      });
    }
-@@ -24789,5 +24807,5 @@ class LocalVideoTrack extends LocalTrack {
+@@ -24789,5 +24830,5 @@ class LocalVideoTrack extends LocalTrack {
                _f = false;
                const sc = _c;
 -              yield (_e = sc.sender) === null || _e === void 0 ? void 0 : _e.replaceTrack(_this.processor.processedTrack);
 +              yield _this.bindProcessorTrack(sc.sender, _this.processor.processedTrack);
              }
            } catch (e_4_1) {
-@@ -24863,4 +24881,6 @@ class LocalVideoTrack extends LocalTrack {
+@@ -24863,4 +24904,6 @@ class LocalVideoTrack extends LocalTrack {
          return;
        }
 +      this.senderRevision++;
 +      this.lastEncodedDimensions = undefined;
        simulcastCodecInfo.sender = sender;
        // the backup codec publishes over its own sender, so it needs the same degradation
-@@ -24923,7 +24943,7 @@ class LocalVideoTrack extends LocalTrack {
+@@ -24923,7 +24966,7 @@ class LocalVideoTrack extends LocalTrack {
                  }
                }
 -            } else if (simulcastCodecInfo.encodings) {
@@ -843,7 +865,7 @@ index c7cfff9..0315b5e 100644
 +              yield setPublishingLayersForSender(() => this.simulcastCodecs.get(codec.codec), codec.qualities, this.senderLock, this.isSvcPublish(codec.codec), this.log, this.logContext);
              }
            }
-@@ -24958,8 +24978,5 @@ class LocalVideoTrack extends LocalTrack {
+@@ -24958,8 +25001,5 @@ class LocalVideoTrack extends LocalTrack {
          qualities
        }));
 -      if (!this.sender || !this.encodings) {
@@ -853,7 +875,7 @@ index c7cfff9..0315b5e 100644
 +      yield setPublishingLayersForSender(() => ({ sender: this.sender, encodings: this.encodings }), qualities, this.senderLock, isSvc, this.log, this.logContext);
      });
    }
-@@ -25017,13 +25034,12 @@ class LocalVideoTrack extends LocalTrack {
+@@ -25017,13 +25057,12 @@ class LocalVideoTrack extends LocalTrack {
    }
  }
 -function setPublishingLayersForSender(sender, senderEncodings, qualities, senderLock, isSVC, log, logContext) {
@@ -872,7 +894,7 @@ index c7cfff9..0315b5e 100644
 +      log.debug('setPublishingLayersForSender', { ...logContext, sender, qualities, senderEncodings });
        const params = sender.getParameters();
        const encodings = params.encodings;
-@@ -26077,20 +26093,28 @@ class RTCEngine extends eventsExports.EventEmitter {
+@@ -26077,20 +26116,28 @@ class RTCEngine extends eventsExports.EventEmitter {
      });
    }
 -  createSimulcastSender(track, simulcastTrack, opts, encodings) {
@@ -917,7 +939,7 @@ index c7cfff9..0315b5e 100644
 +    return sender;
    }
    get frameMetadataWorker() {
-@@ -26164,21 +26188,20 @@ class RTCEngine extends eventsExports.EventEmitter {
+@@ -26164,21 +26211,20 @@ class RTCEngine extends eventsExports.EventEmitter {
      });
    }
 -  createSimulcastTransceiverSender(track, simulcastTrack, opts, encodings) {
@@ -954,7 +976,7 @@ index c7cfff9..0315b5e 100644
 +      await track.setSimulcastTrackSender(opts.videoCodec, transceiver.sender);
        return transceiver.sender;
      });
-@@ -32378,50 +32401,42 @@ class Participant extends eventsExports.EventEmitter {
+@@ -32378,50 +32424,42 @@ class Participant extends eventsExports.EventEmitter {
        this.unpublishTrack(track.track);
      };
 -    this.handleTrackEnded = track => __awaiter(this, void 0, void 0, function* () {
@@ -1035,7 +1057,7 @@ index c7cfff9..0315b5e 100644
 +    };
      this.audioTrackPublications = new Map();
      this.videoTrackPublications = new Map();
-@@ -33934,29 +33949,15 @@ class Participant extends eventsExports.EventEmitter {
+@@ -33934,29 +33972,15 @@ class Participant extends eventsExports.EventEmitter {
     * @internal
     */
 -  restartOnDefaultAudioDevice(track) {
@@ -1076,7 +1098,7 @@ index c7cfff9..0315b5e 100644
 +    }
    }
    getPublicationForTrack(track) {
-@@ -38479,3 +38480,3 @@ const serializers = {
+@@ -38479,3 +38503,3 @@ const serializers = {
    raw,
    custom
 -};export{AudioPresets,BackupCodecPolicy,BaseKeyProvider,CLIENT_PROTOCOL_DATA_STREAM_RPC,CLIENT_PROTOCOL_DATA_STREAM_V2,CLIENT_PROTOCOL_DEFAULT,CheckStatus,Checker,ConnectionCheck,ConnectionError,ConnectionErrorReason,ConnectionQuality,ConnectionState,CriticalTimers,CryptorError,CryptorErrorReason,CryptorEvent,DataPacket_Kind,DataStreamError,DataStreamErrorReason,DataTrackPacket,DefaultReconnectPolicy,DeviceUnsupportedError,DisconnectReason,EncryptionEvent,Encryption_Type,EngineEvent,ExternalE2EEKeyProvider,FrameMetadataManager,KeyHandlerEvent,KeyProviderEvent,LivekitError,LivekitReasonedError,LocalAudioTrack,LocalDataTrack,LocalParticipant,LocalTrack,LocalTrackPublication,LocalTrackRecorder,LocalVideoTrack,LogLevel,LoggerNames,MediaDeviceFailure,_ as Mutex,NegotiationError,PacketTrailerManager,Participant,ParticipantEvent,ParticipantInfo_Kind as ParticipantKind,PublishDataError,PublishTrackError,RemoteAudioTrack,RemoteDataTrack,RemoteParticipant,RemoteTrack,RemoteTrackPublication,RemoteVideoTrack,Room,RoomEvent,RpcError,ScreenSharePresets,SignalReconnectError,SignalRequestError,SimulatedError,SubscriptionError,TokenSource,TokenSourceConfigurable,TokenSourceFixed,Track,TrackEvent,TrackInvalidError,TrackPublication,TrackType,UnexpectedConnectionState,UnsupportedServer,VideoPreset,VideoPresets,VideoPresets43,VideoQuality,areTokenSourceFetchOptionsEqual,asEncryptablePacket,attachToElement,attributeTypings as attributes,audioCodecs,canFailOverToAnotherRegion,clientProtocol,compareVersions,createAudioAnalyser,createE2EEKey,createKeyMaterialFromBuffer,createKeyMaterialFromString,createLocalAudioTrack,createLocalScreenTracks,createLocalTracks,createLocalVideoTrack,decodeTokenPayload,deriveKeys,detachTrack,facingModeFromDeviceLabel,facingModeFromLocalTrack,getBrowser,getEmptyAudioStreamTrack,getEmptyVideoStreamTrack,getLogger,importKey,isAudioCodec,isAudioTrack,isBackupCodec,isBackupVideoCodec,isBrowserSupported,isE2EESupported,isInsertableStreamSupported,isLocalParticipant,isLocalTrack,isRemoteParticipant,isRemoteTrack,isSVCCodec,isScriptTransformSupported,isSerializer,isVideoCodec,isVideoFrame,isVideoTrack,needsRbspUnescaping,parseRbsp,protocolVersion,ratchet,releaseEmptyAudioStreamTrack,serializers,setLogExtension,setLogLevel,supportsAV1,supportsAdaptiveStream,supportsAudioOutputSelection,supportsDynacast,supportsH265,supportsVP9,version,videoCodecs,writeRbsp};//# sourceMappingURL=livekit-client.esm.mjs.map
@@ -1292,14 +1314,15 @@ index 0b4bd5b..a02ca1b 100644
          this.observeProcessedTrack(this.processor.processedTrack);
        }
 diff --git a/src/room/track/LocalTrack.ts b/src/room/track/LocalTrack.ts
-index 3042f8d..14e2044 100644
+index 3042f8d..d7efcee 100644
 --- a/src/room/track/LocalTrack.ts
 +++ b/src/room/track/LocalTrack.ts
-@@ -24,4 +24,11 @@ const DEFAULT_DIMENSIONS_TIMEOUT = 1000;
+@@ -24,4 +24,12 @@ const DEFAULT_DIMENSIONS_TIMEOUT = 1000;
  const PRE_CONNECT_BUFFER_TIMEOUT = 10_000;
  
 +export interface CaptureRecovery {
 +  current(): boolean;
++  candidatesAreLive(): boolean;
 +  retry(): Promise<void>;
 +  signal: AbortSignal;
 +  candidates: Set<MediaStreamTrack>;
@@ -1307,20 +1330,27 @@ index 3042f8d..14e2044 100644
 +
  export default abstract class LocalTrack<
    TrackKind extends Track.Kind = Track.Kind,
-@@ -38,4 +45,5 @@ export default abstract class LocalTrack<
+@@ -38,4 +46,5 @@ export default abstract class LocalTrack<
    /** @internal */
    set sender(sender: RTCRtpSender | undefined) {
 +    if (this._sender !== sender) this.cancelCaptureRecovery();
      this._sender = sender;
    }
-@@ -56,4 +64,6 @@ export default abstract class LocalTrack<
+@@ -56,4 +65,6 @@ export default abstract class LocalTrack<
    protected reacquireTrack: boolean;
  
 +  private pendingRecovery?: CaptureRecovery & { controller: AbortController };
 +
    protected providedByUser: boolean;
  
-@@ -130,8 +140,8 @@ export default abstract class LocalTrack<
+@@ -62,4 +73,6 @@ export default abstract class LocalTrack<
+   protected pauseUpstreamLock: Mutex;
+ 
++  private discardedProcessorOutput?: MediaStreamTrack;
++
+   protected processorElement?: HTMLMediaElement;
+ 
+@@ -130,8 +143,8 @@ export default abstract class LocalTrack<
    }
  
 -  private _isUpstreamPaused: boolean = false;
@@ -1331,13 +1361,21 @@ index 3042f8d..14e2044 100644
 +    return this.pauseReasons.size > 0;
    }
  
-@@ -164,4 +174,5 @@ export default abstract class LocalTrack<
+@@ -145,5 +158,6 @@ export default abstract class LocalTrack<
+ 
+   get mediaStreamTrack() {
+-    return this.processor?.processedTrack ?? this._mediaStreamTrack;
++    const output = this.processor?.processedTrack;
++    return output && output !== this.discardedProcessorOutput ? output : this._mediaStreamTrack;
+   }
+ 
+@@ -164,4 +178,5 @@ export default abstract class LocalTrack<
      force?: boolean,
      isUnmuting?: boolean,
 +    recovery?: CaptureRecovery,
    ) {
      if (newTrack === this._mediaStreamTrack && !force) {
-@@ -179,16 +190,4 @@ export default abstract class LocalTrack<
+@@ -179,18 +194,7 @@ export default abstract class LocalTrack<
      }
  
 -    this.mediaStream = new MediaStream([newTrack]);
@@ -1353,10 +1391,25 @@ index 3042f8d..14e2044 100644
 -      this._constraints = newTrack.getConstraints();
 -    }
      let processedTrack: MediaStreamTrack | undefined;
-     if (this.processor && newTrack) {
-@@ -214,24 +213,33 @@ export default abstract class LocalTrack<
-       processedTrack = this.processor.processedTrack;
-     }
+-    if (this.processor && newTrack) {
++    const processor = this.processor;
++    if (processor && newTrack) {
+       this.log.debug('restarting processor', this.logContext);
+       if (this.kind === 'unknown') {
+@@ -203,35 +207,53 @@ export default abstract class LocalTrack<
+         this.processorElement.muted = true;
+       }
+-      await this.processor.restart({
+-        track: newTrack,
+-        kind: this.kind,
+-        element: this.processorElement,
+-        // audio processors need the context they were initialised with in order to rebuild
+-        // their graph, omitting it here would leave them without one
+-        audioContext: this.audioContext,
+-        localTrack: this,
+-      });
+-      processedTrack = this.processor.processedTrack;
+-    }
 -    if (this.sender && this.sender.transport?.state !== 'closed') {
 -      await this.sender.replaceTrack(processedTrack ?? newTrack);
 -    }
@@ -1375,23 +1428,42 @@ index 3042f8d..14e2044 100644
 -      this.attachedElements.forEach((el) => {
 -        attachToElement(processedTrack ?? newTrack, el);
 -      });
--    }
++      const previousOutput = processor.processedTrack;
++      try {
++        await processor.restart({
++          track: newTrack,
++          kind: this.kind,
++          element: this.processorElement,
++          // audio processors need the context they were initialised with in order to rebuild
++          // their graph, omitting it here would leave them without one
++          audioContext: this.audioContext,
++          localTrack: this,
++        });
++      } finally {
++        processedTrack = processor.processedTrack;
++        if (recovery && processedTrack && processedTrack !== previousOutput &&
++            (this.processor === processor || processedTrack !== this.processor?.processedTrack)) {
++          recovery.candidates.add(processedTrack);
++        }
++      }
+     }
 -    await this.onMediaStreamTrackChanged();
 +    await this.withUpstreamLock(async () => {
-+      if (recovery && !recovery.current()) return;
++      if (recovery && !recovery.candidatesAreLive()) return;
 +      const outgoing = processedTrack ?? newTrack;
 +      const held = this.pauseReasons.has('caller');
 +      newTrack.enabled = isUnmuting || !this.isMuted;
 +      if (!held && this.sender && this.sender.transport?.state !== 'closed') {
 +        await this.sender.replaceTrack(outgoing);
 +      }
-+      if (recovery && !recovery.current()) return;
++      if (recovery && !recovery.candidatesAreLive()) return;
 +      await this.updateBackupTracks(!held, outgoing, recovery);
-+      if (recovery && !recovery.current()) return;
++      if (recovery && !recovery.candidatesAreLive()) return;
 +      if (!this.providedByUser && this._mediaStreamTrack !== newTrack) {
 +        this._mediaStreamTrack.stop();
 +      }
 +      this._mediaStreamTrack = newTrack;
++      this.discardedProcessorOutput = undefined;
 +      newTrack.enabled = isUnmuting || !this.isMuted;
 +      this.mediaStream = new MediaStream([newTrack]);
 +      newTrack.addEventListener('ended', this.handleEnded);
@@ -1408,13 +1480,13 @@ index 3042f8d..14e2044 100644
 +    if (this._mediaStreamTrack === newTrack) await this.onMediaStreamTrackChanged();
    }
  
-@@ -335,4 +343,5 @@ export default abstract class LocalTrack<
+@@ -335,4 +357,5 @@ export default abstract class LocalTrack<
      userProvidedOrOptions: boolean | ReplaceTrackOptions | undefined,
    ) {
 +    this.cancelCaptureRecovery();
      const unlock = await this.trackChangeLock.lock();
      try {
-@@ -379,9 +388,13 @@ export default abstract class LocalTrack<
+@@ -379,9 +402,13 @@ export default abstract class LocalTrack<
    }
  
 -  protected async restart(constraints?: MediaTrackConstraints, isUnmuting?: boolean) {
@@ -1430,7 +1502,7 @@ index 3042f8d..14e2044 100644
 +      if (this.manuallyStopped || (recovery && !recovery.current())) return;
        if (!constraints) {
          constraints = this._constraints;
-@@ -422,19 +435,16 @@ export default abstract class LocalTrack<
+@@ -422,19 +449,16 @@ export default abstract class LocalTrack<
        const newTrack = mediaStream.getTracks()[0];
        try {
 -        if (this.kind === Track.Kind.Video) {
@@ -1448,20 +1520,20 @@ index 3042f8d..14e2044 100644
 -          newTrack.stop();
 +        if (recovery && !recovery.current()) return;
 +        recovery?.candidates.add(newTrack);
++        if (recovery && !recovery.candidatesAreLive()) return;
 +        if (this.kind === Track.Kind.Video) await newTrack.applyConstraints(otherConstraints);
-+        if (recovery && !recovery.current()) return;
++        if (recovery && !recovery.candidatesAreLive()) return;
 +        await this.setMediaStreamTrack(newTrack, false, isUnmuting, recovery);
 +        if (this._mediaStreamTrack !== newTrack) return;
 +      } finally {
 +        if (recovery && this._mediaStreamTrack !== newTrack) {
-+          for (const candidate of recovery.candidates) candidate.stop();
-+          recovery.candidates.clear();
++          this.discardCaptureCandidates(recovery);
          }
 -        throw e;
 +        if (this._mediaStreamTrack !== newTrack && newTrack.readyState !== 'ended') newTrack.stop();
        }
        this._constraints = constraints;
-@@ -455,5 +465,63 @@ export default abstract class LocalTrack<
+@@ -455,5 +479,74 @@ export default abstract class LocalTrack<
    }
  
 +  /** @internal */
@@ -1488,6 +1560,8 @@ index 3042f8d..14e2044 100644
 +      candidates: new Set<MediaStreamTrack>(),
 +      current: () => this.pendingRecovery === recovery && capture === this._mediaStreamTrack &&
 +        sender === this.sender && !this.isMuted && !this.isStopped && !this.isUserProvided && isPublished(),
++      candidatesAreLive: () => recovery.current() &&
++        Array.from(recovery.candidates).every(candidate => candidate.readyState === 'live'),
 +      retry: (): Promise<void> => {
 +        if (!recovery.current()) {
 +          if (this.pendingRecovery === recovery) this.cancelCaptureRecovery();
@@ -1511,10 +1585,19 @@ index 3042f8d..14e2044 100644
 +    const recovery = this.pendingRecovery;
 +    if (!recovery) return;
 +    this.pendingRecovery = undefined;
-+    if (!adopted) for (const track of recovery.candidates) track.stop();
-+    recovery.candidates.clear();
++    if (adopted) recovery.candidates.clear();
++    else this.discardCaptureCandidates(recovery);
 +    recovery.controller.abort();
 +    if (this.kind !== Track.Kind.Video || !this.attachedElements.length) super.removeAppVisibilityListener();
++  }
++
++  private discardCaptureCandidates(recovery: CaptureRecovery) {
++    const output = this.processor?.processedTrack;
++    if (output && recovery.candidates.has(output)) this.discardedProcessorOutput = output;
++    for (const candidate of recovery.candidates) {
++      if (candidate.readyState !== 'ended') candidate.stop();
++    }
++    recovery.candidates.clear();
 +  }
 +
 +  protected override removeAppVisibilityListener() {
@@ -1525,7 +1608,7 @@ index 3042f8d..14e2044 100644
 +    if (muted) this.cancelCaptureRecovery();
      this.log.debug(`setting ${this.kind} track ${muted ? 'muted' : 'unmuted'}`, this.logContext);
  
-@@ -481,8 +549,9 @@ export default abstract class LocalTrack<
+@@ -481,8 +574,9 @@ export default abstract class LocalTrack<
      this.log.debug(`visibility changed, is in Background: ${this.isInBackground}`, this.logContext);
  
 -    if (!this.isInBackground && this.needsReAcquisition && !this.isUserProvided && !this.isMuted) {
@@ -1539,7 +1622,7 @@ index 3042f8d..14e2044 100644
 +      await this.recoverWhenAvailable(() => true, recovery => this.recoverCapture(recovery));
      }
    }
-@@ -494,10 +563,10 @@ export default abstract class LocalTrack<
+@@ -494,10 +588,10 @@ export default abstract class LocalTrack<
  
    private debouncedTrackMuteHandler = debounce(async () => {
 -    await this.pauseUpstream();
@@ -1552,14 +1635,14 @@ index 3042f8d..14e2044 100644
 +    await this.setUpstreamPaused('capture', false);
    };
  
-@@ -512,4 +581,6 @@ export default abstract class LocalTrack<
+@@ -512,4 +606,6 @@ export default abstract class LocalTrack<
  
    stop() {
 +    this.cancelCaptureRecovery();
 +    this.debouncedTrackMuteHandler.cancel('stop');
      this.manuallyStopped = true;
      super.stop();
-@@ -533,46 +604,36 @@ export default abstract class LocalTrack<
+@@ -533,46 +629,36 @@ export default abstract class LocalTrack<
     **/
    async pauseUpstream() {
 -    const unlock = await this.pauseUpstreamLock.lock();
@@ -1573,13 +1656,13 @@ index 3042f8d..14e2044 100644
 -      }
 +    await this.setUpstreamPaused('caller', true);
 +  }
-+
-+  async resumeUpstream() {
-+    await this.setUpstreamPaused('caller', false);
-+  }
  
 -      this._isUpstreamPaused = true;
 -      this.emit(TrackEvent.UpstreamPaused, this);
++  async resumeUpstream() {
++    await this.setUpstreamPaused('caller', false);
++  }
++
 +  private async setUpstreamPaused(reason: 'caller' | 'capture', paused: boolean) {
 +    await this.withUpstreamLock(async () => {
 +      if (!this.sender) return;
@@ -1628,7 +1711,7 @@ index 3042f8d..14e2044 100644
 +      return await operation();
      } finally {
        unlock();
-@@ -580,4 +641,14 @@ export default abstract class LocalTrack<
+@@ -580,4 +666,14 @@ export default abstract class LocalTrack<
    }
  
 +  protected async updateBackupTracks(_sending: boolean, _replacement?: MediaStreamTrack, _recovery?: CaptureRecovery): Promise<void> {}
@@ -1643,7 +1726,7 @@ index 3042f8d..14e2044 100644
 +
    /**
     * Gets the RTCStatsReport for the LocalTrack's underlying RTCRtpSender
-@@ -660,5 +731,5 @@ export default abstract class LocalTrack<
+@@ -660,5 +756,5 @@ export default abstract class LocalTrack<
            }
          }
 -        await this.sender?.replaceTrack(this.processor.processedTrack);
@@ -1651,7 +1734,7 @@ index 3042f8d..14e2044 100644
        }
        this.emit(TrackEvent.TrackProcessorUpdate, this.processor);
 diff --git a/src/room/track/LocalVideoTrack.ts b/src/room/track/LocalVideoTrack.ts
-index 65f72f2..642077b 100644
+index 65f72f2..3f56755 100644
 --- a/src/room/track/LocalVideoTrack.ts
 +++ b/src/room/track/LocalVideoTrack.ts
 @@ -18,5 +18,5 @@ import { computeBitrate, monitorFrequency } from '../stats';
@@ -1695,7 +1778,7 @@ index 65f72f2..642077b 100644
 -      await sc.sender?.replaceTrack(sc.mediaStreamTrack);
 +  protected override async updateBackupTracks(sending: boolean, replacement?: MediaStreamTrack, recovery?: CaptureRecovery) {
 +    for (const sc of this.simulcastCodecs.values()) {
-+      if (recovery && !recovery.current()) return;
++      if (recovery && !recovery.candidatesAreLive()) return;
 +      if (sc.sender?.transport?.state === 'closed') continue;
 +      const next = replacement?.clone();
 +      if (next) recovery?.candidates.add(next);
@@ -1703,7 +1786,7 @@ index 65f72f2..642077b 100644
 +        if (sc.sender && (sending || !replacement)) {
 +          await sc.sender.replaceTrack(sending ? next ?? sc.mediaStreamTrack : null);
 +        }
-+        if (recovery && !recovery.current()) return;
++        if (recovery && !recovery.candidatesAreLive()) return;
 +        if (next) {
 +          sc.mediaStreamTrack.stop();
 +          sc.mediaStreamTrack = next;
