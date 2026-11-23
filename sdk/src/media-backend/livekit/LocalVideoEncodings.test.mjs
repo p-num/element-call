@@ -1,0 +1,128 @@
+/*
+Copyright 2026 Element Creations Ltd.
+
+SPDX-License-Identifier: AGPL-3.0-only OR LicenseRef-Element-Commercial
+Please see LICENSE in the repository root for full details.
+*/
+
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { LocalVideoTrack, Track, VideoQuality } from "livekit-client";
+import { Capture, Stream, sender } from "./capture-fixture.mjs";
+
+const large = { width: 1280, height: 720 };
+const small = { width: 640, height: 360 };
+const tracks = [];
+beforeEach(() => vi.stubGlobal("MediaStream", Stream));
+afterEach(() => {
+  tracks.splice(0).forEach((t) => t.stop());
+  vi.unstubAllGlobals();
+});
+
+it("can still disable a negotiated layer after a smaller camera has fewer proposed layers", async () => {
+  const { track, primary, swap } = await publishedCamera();
+  await swap(small);
+  await track.setPublishingLayers(false, [
+    { quality: VideoQuality.HIGH, enabled: false },
+  ]);
+  expect(primary.encodings.at(-1).active).toBe(false);
+  primary.encodings = layers(2);
+  await swap(small);
+  expect(primary.encodings[0].maxBitrate).toBeGreaterThan(1);
+});
+
+it.each(["rejected", "mismatched"])(
+  "retries the old dimensions after a %s backup update",
+  async (failure) => {
+    const { track, primary, swap } = await publishedCamera();
+    const backup = sender(layers(3));
+    const sc = track.addSimulcastTrack(
+      "h264",
+      backup.getParameters().encodings,
+    );
+    sc.sender = backup;
+    await swap(large);
+    const old = primary.encodings.at(-1).maxBitrate;
+    if (failure === "rejected")
+      backup.setParameters.mockRejectedValueOnce(new Error("encoder busy"));
+    else backup.encodings = layers(2);
+    const larger = { width: 1920, height: 1080 };
+    await swap(larger);
+    expect(primary.encodings.at(-1).maxBitrate).not.toBe(old);
+    expect(sc.encodings.at(-1).maxBitrate).toBe(old);
+    backup.encodings = layers(3);
+    await swap(large);
+    expect(primary.encodings.at(-1).maxBitrate).toBe(old);
+    expect(backup.encodings.at(-1).maxBitrate).toBe(old);
+  },
+);
+
+it("refreshes the backup after a rejected primary and retries the same dimensions", async () => {
+  const { track, primary, swap } = await publishedCamera();
+  const backup = sender(layers(3));
+  track.addSimulcastTrack("h264", backup.getParameters().encodings).sender =
+    backup;
+  primary.setParameters.mockRejectedValueOnce(new Error("busy"));
+  await swap(large);
+  expect(backup.encodings[0].maxBitrate).toBeGreaterThan(1);
+  await swap(large);
+  expect(primary.encodings[0].maxBitrate).toBeGreaterThan(1);
+});
+
+it("only commits the baseline to the sender that acknowledged it", async () => {
+  const { track, primary, swap } = await publishedCamera();
+  const started = Promise.withResolvers();
+  const written = Promise.withResolvers();
+  primary.setParameters.mockImplementationOnce(() => {
+    started.resolve();
+    return written.promise;
+  });
+  const swapped = swap(large);
+  await started.promise;
+  expect(track.encodings).toEqual(layers(3));
+  track.sender = sender(layers(3));
+  written.resolve();
+  await swapped;
+  expect(track.encodings).toEqual(layers(3));
+  await swap(large);
+  expect(track.sender.encodings[0].maxBitrate).toBeGreaterThan(1);
+});
+
+it("retains the disabled layer's negotiated sentinel and its nominal restoration bitrate", async () => {
+  const { track, primary, swap } = await publishedCamera();
+  primary.encodings[0] = {
+    rid: "q",
+    active: false,
+    maxBitrate: 1,
+    scaleResolutionDownBy: 4,
+  };
+  await swap(large);
+  expect(primary.encodings[0].maxBitrate).toBe(1);
+  expect(track.encodings[0].maxBitrate).toBeGreaterThan(1);
+});
+
+async function publishedCamera() {
+  const track = new LocalVideoTrack(new Capture("video", large), {}, false);
+  tracks.push(track);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const primary = sender(layers(3));
+  track.source = Track.Source.Camera;
+  track.sender = primary;
+  track.publishOptions = {
+    simulcast: true,
+    videoCodec: "vp8",
+    backupCodec: { codec: "h264" },
+  };
+  track.startMonitor();
+  primary.setParameters.mockClear();
+  return {
+    track,
+    primary,
+    swap: (dims) => track.replaceTrack(new Capture("video", dims), false),
+  };
+}
+
+function layers(count) {
+  return ["q", "h", "f"]
+    .slice(-count)
+    .map((rid) => ({ rid, active: true, maxBitrate: 1 }));
+}
